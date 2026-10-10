@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1788051343362,
+      "tag": "0000_sync_constraints",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1788139052574,
+      "tag": "0001_billing_plans",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1788805787784,
+      "tag": "0002_site_analytics",
+      "breakpoints": true
+    }
+  ]
+}
