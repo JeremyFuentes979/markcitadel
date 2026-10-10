@@ -1,3 +1,4 @@
+import PDFKit from "pdfkit";
 import {
   getLiveTrademarkCount,
   phoneticVariants,
@@ -12,18 +13,10 @@ import { checkDomains, nameToLabel } from "./domains";
  * generated from data we already pull.
  */
 
-// pdfkit is loaded at runtime (not bundled): its CJS internals collide with
-// the ESM server bundle's createRequire banner. node_modules is present at
-// runtime, so a plain require resolves it.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let PDFDocumentClass: any = null;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function loadPdfkit(): Promise<any> {
-  if (!PDFDocumentClass) {
-    const { createRequire } = await import("node:module");
-    PDFDocumentClass = createRequire(import.meta.url)("pdfkit");
-  }
-  return PDFDocumentClass;
+// pdfkit is imported normally and kept external to the bundle (netlify.toml
+// external_node_modules) so its font metric files ship alongside it.
+async function loadPdfkit(): Promise<typeof PDFKit> {
+  return PDFKit;
 }
 
 const NAVY = "#2b3d60";

@@ -75,7 +75,7 @@ export function ApiKeysSection({ origin }: { origin: string }) {
           to="/login"
           className="inline-flex items-center gap-2 text-sm font-medium bg-navy-600 text-white rounded-lg px-5 py-2.5 hover:bg-navy-700 transition-colors"
         >
-          Sign in with Kimi
+          Sign in
         </Link>
       </div>
     );

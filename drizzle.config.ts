@@ -1,16 +1,13 @@
 import "dotenv/config";
 import { defineConfig } from "drizzle-kit";
 
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) {
-  throw new Error("DATABASE_URL is required to run drizzle commands");
-}
+// Migrations: use the Supabase *session* pooler (port 5432) or direct URL.
+const connectionString =
+  process.env.DATABASE_URL_MIGRATIONS ?? process.env.DATABASE_URL ?? "";
 
 export default defineConfig({
   schema: "./db/schema.ts",
   out: "./db/migrations",
-  dialect: "mysql",
-  dbCredentials: {
-    url: connectionString,
-  },
+  dialect: "postgresql",
+  dbCredentials: { url: connectionString },
 });

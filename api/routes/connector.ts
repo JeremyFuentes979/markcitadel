@@ -53,12 +53,10 @@ async function requireKey(c: Context): Promise<Response | null> {
  * have. External tools (curl, AI agents, other sites) always need a key.
  */
 async function requireKeyUnlessInternal(c: Context): Promise<Response | null> {
-  const cookie = c.req.header("cookie") ?? "";
+  // Same-origin browser requests from our own SPA (Sec-Fetch-Site is set by
+  // the browser and can't be forged by page scripts).
   const secFetchSite = c.req.header("sec-fetch-site") ?? "";
-  const hasSession = cookie.includes("session=");
-  const isBrowserSameSite =
-    secFetchSite === "same-origin" || secFetchSite === "same-site";
-  if (hasSession || isBrowserSameSite) return null;
+  if (secFetchSite === "same-origin") return null;
   return requireKey(c);
 }
 

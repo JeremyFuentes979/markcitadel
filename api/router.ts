@@ -17,7 +17,7 @@ import {
 } from "./services/alerts";
 import { getDb } from "./queries/connection";
 import { savedSearches, watches } from "@db/schema";
-import { authRouter } from "./auth-router";
+import { isOwner } from "./queries/users";
 import {
   createApiKey,
   listKeysForUser,
@@ -38,7 +38,6 @@ import {
   reportsConfigured,
 } from "./services/plans";
 import { attorneyLeads, users } from "@db/schema";
-import { env } from "./lib/env";
 import { getSiteStats } from "./services/analytics";
 
 const searchRouter = createRouter({
@@ -372,12 +371,12 @@ const billingRouter = createRouter({
 
   /** Whether the caller is the site owner (for showing the admin panel). */
   isOwner: authedQuery.query(
-    ({ ctx }) => !!env.ownerUnionId && ctx.user.unionId === env.ownerUnionId,
+    ({ ctx }) => isOwner(ctx.user),
   ),
 
   /** Owner-only: read-only view of subscribers and report sales. */
   adminActivity: authedQuery.query(({ ctx }) => {
-    if (!env.ownerUnionId || ctx.user.unionId !== env.ownerUnionId) {
+    if (!isOwner(ctx.user)) {
       throw new TRPCError({ code: "FORBIDDEN" });
     }
     return listBillingActivity();
@@ -385,7 +384,7 @@ const billingRouter = createRouter({
 
   /** Owner-only: attorney-referral leads. */
   adminLeads: authedQuery.query(async ({ ctx }) => {
-    if (!env.ownerUnionId || ctx.user.unionId !== env.ownerUnionId) {
+    if (!isOwner(ctx.user)) {
       throw new TRPCError({ code: "FORBIDDEN" });
     }
     const rows = await getDb()
@@ -431,7 +430,10 @@ const leadsRouter = createRouter({
 
 export const appRouter = createRouter({
   ping: publicQuery.query(() => ({ ok: true, ts: Date.now() })),
-  auth: authRouter,
+  auth: createRouter({
+    /** Current user (null when signed out). Sign-out happens in Supabase on the client. */
+    me: publicQuery.query(({ ctx }) => ctx.user ?? null),
+  }),
   search: searchRouter,
   library: libraryRouter,
   apiKeys: apiKeysRouter,
@@ -440,7 +442,7 @@ export const appRouter = createRouter({
   analytics: createRouter({
     /** Owner-only: first-party site traffic stats. */
     stats: authedQuery.query(async ({ ctx }) => {
-      if (!env.ownerUnionId || ctx.user.unionId !== env.ownerUnionId) {
+      if (!isOwner(ctx.user)) {
         throw new TRPCError({ code: "FORBIDDEN" });
       }
       return getSiteStats(30);

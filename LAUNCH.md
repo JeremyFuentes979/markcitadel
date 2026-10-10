@@ -30,11 +30,10 @@ take real money safely. Original upload is the first git commit; `git diff HEAD~
   /pricing (cancel, change card, invoices). Past-due warning shown.
 - Owner panel on /pricing is now read-only (subscribers, report sales,
   attorney leads); Stripe is the source of truth for money.
-- **Migration** `db/migrations/0003_stripe_billing.sql`: adds
+- **Database fields** (now in the Postgres baseline): adds
   `users.plan / stripe_customer_id / stripe_subscription_id / subscription_status / current_period_end`,
   tables `stripe_events`, `report_purchases`, `attorney_leads`, and carries
   existing Pro users over (re-check them against Stripe).
-  The old `upgrade_tokens` table is left in place (unused) for history.
 
 ### $29 Name Clearance Report (new revenue line)
 - The free name check still runs (live TM count, domains, sound-alikes).
@@ -102,86 +101,149 @@ one the USPTO website uses, which isn't an official API. Official options:
 
 ---
 
-## 2. Environment variables
+## 2. Platform: Supabase + Netlify (second change set)
 
-| Var | Purpose |
+- **Database:** Supabase Postgres via Drizzle (`drizzle-orm/postgres-js`,
+  `prepare: false` for the transaction pooler, one connection per function
+  instance). The schema was converted from MySQL: `pgTable`, native enums,
+  `bigserial` ids, `timestamptz`, `jsonb`. Upserts now use `onConflictDoUpdate`
+  and `onConflictDoNothing`.
+  - Fresh baseline migration: `db/migrations/0000_baseline.sql`.
+  - Paste-ready SQL: **`supabase/schema.sql`**. It turns on RLS for all 12
+    tables with no policies and revokes Data API grants from `anon` and
+    `authenticated`, so the browser can't reach any table directly.
+  - The old `upgrade_tokens` table was dropped.
+- **Auth:** Kimi OAuth is removed completely. Login is now Supabase Auth
+  (Google, or an email magic link) on `/login`.
+  - The browser sends the Supabase access token as `Authorization: Bearer` on
+    every tRPC call. The API verifies it with `jose`, using the project's
+    JWKS by default or `SUPABASE_JWT_SECRET` if you set it (older HS256
+    projects).
+  - On each verified request the API upserts a `users` row keyed by the
+    Supabase user id (`auth_id`) and email.
+  - Owner/admin is whoever signs in with **`OWNER_EMAIL`**.
+- **Hosting:** Netlify. The SPA is served from `dist/public`, and the whole
+  API is one Netlify Function, `netlify/functions/api.mts`. That function
+  passes the Web Request straight to the existing Hono app (`api/app.ts`),
+  so the body stays raw and Stripe signature checks work.
+  - It's routed by `config.path = "/api/*"`, plus a `netlify.toml` rewrite
+    and the SPA fallback.
+- **Serverless-safe state:**
+  - USPTO cache → `api_cache` table (6h fresh, 48h stale-if-error, plus a
+    small per-instance memo).
+  - Per-minute API limits → `rate_limits` table (atomic fixed-window upsert).
+  - The ppubs patent session is shared through the cache.
+  - Pageviews are now a `/api/pv` beacon, because the CDN serves the HTML.
+- **USPTO timeouts on Netlify:** one 8s budget per call with at most 2
+  attempts, to stay under the ~10s function limit. A long-running Node
+  server still gets 12s × 3.
+- A long-running Node server still works (`npm run build && npm start`) if
+  you ever leave Netlify.
+
+## 3. Environment variables
+
+Set these in Netlify (**Site configuration → Environment variables**). For
+local dev, put them in `.env` (template: `.env.example`).
+
+| Var | Where it comes from |
 |---|---|
-| `DATABASE_URL` | MySQL connection string |
-| `APP_ID`, `APP_SECRET` | App id + JWT signing secret |
-| `KIMI_AUTH_URL`, `KIMI_OPEN_URL`, `VITE_KIMI_AUTH_URL`, `VITE_APP_ID` | Current login (Kimi OAuth); see risks |
-| `OWNER_UNION_ID` | Your user, for owner panels |
-| `APP_URL` | Public URL, e.g. `https://markcitadel.com` (used for Stripe redirects) |
-| `USPTO_ODP_API_KEY` | Official USPTO ODP key (strongly recommended) |
-| `STRIPE_SECRET_KEY` | `sk_test_…` first, then `sk_live_…` |
-| `STRIPE_WEBHOOK_SECRET` | `whsec_…` of the webhook endpoint |
+| `VITE_SUPABASE_URL` | Supabase → Project Settings → API → Project URL |
+| `VITE_SUPABASE_ANON_KEY` | Supabase → API keys → `anon` / publishable key |
+| `SUPABASE_URL` | Same as `VITE_SUPABASE_URL` (server uses it for JWKS) |
+| `SUPABASE_JWT_SECRET` | Optional. Only for legacy HS256 projects (API → JWT Settings). Leave empty to use JWKS |
+| `DATABASE_URL` | Supabase → **Connect** → *Transaction pooler* URI (port **6543**), password filled in |
+| `DATABASE_URL_MIGRATIONS` | Optional, only for `drizzle-kit`: *Session pooler* URI (port 5432) |
+| `APP_URL` | `https://markcitadel.com` (or the `*.netlify.app` URL at first) |
+| `OWNER_EMAIL` | Your login email (admin plus owner panels) |
+| `USPTO_ODP_API_KEY` | data.uspto.gov/apikey |
+| `STRIPE_SECRET_KEY` | Stripe → Developers → API keys |
+| `STRIPE_WEBHOOK_SECRET` | `whsec_…` of the Netlify webhook endpoint (step 4.4) |
 | `STRIPE_PRICE_PRO` | `price_…` recurring $29/month |
 | `STRIPE_PRICE_REPORT` | `price_…` one-time $29 |
 
-Removed: `STRIPE_PAYMENT_LINK`. Buttons show "Coming soon" until the Stripe vars are set.
+`VITE_*` vars are baked into the front end at build time, so redeploy after
+changing them. All others are read by the function at runtime.
 
----
+## 4. Step-by-step setup
 
-## 3. Stripe setup (do this in Test mode first)
+### 4.1 Supabase project
+1. supabase.com → **New project** (pick the US East region, close to Netlify's
+   default functions region). Save the database password.
+2. **SQL Editor → New query** → paste all of `supabase/schema.sql` → **Run**.
+   You should see 12 tables under Table Editor, each with RLS "enabled".
+   Use this file *or* `npm run db:migrate`, not both.
+3. **Connect** (top bar) → copy the **Transaction pooler** string →
+   `DATABASE_URL` (replace `[YOUR-PASSWORD]`).
+4. **Project Settings → API** → copy the Project URL and the anon key.
 
-1. **Products → Add product** "MarkCitadel Pro", recurring **$29 / month**.
-   Copy the price id → `STRIPE_PRICE_PRO`.
-2. **Add product** "Name Clearance Report", **one-time $29**. Copy the price id
-   → `STRIPE_PRICE_REPORT`.
-3. **Developers → API keys** → secret key → `STRIPE_SECRET_KEY`.
-4. **Developers → Webhooks → Add endpoint**:
-   `https://<your-domain>/api/stripe/webhook`. Events:
-   `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+### 4.2 Supabase Auth
+1. **Authentication → Sign In / Providers → Email:** enabled. Turn on
+   "Confirm email". Magic links work with no password.
+2. **Authentication → URL Configuration**:
+   - Site URL: `https://markcitadel.com` (or your `*.netlify.app` URL)
+   - Redirect URLs: `https://markcitadel.com/login*`,
+     `https://*.netlify.app/login*` (deploy previews),
+     `http://localhost:3000/login*`
+3. **Google:**
+   - In Google Cloud Console → APIs & Services → Credentials, create an
+     OAuth client ID of type *Web application*. Authorized redirect URI:
+     `https://<project-ref>.supabase.co/auth/v1/callback`.
+   - Set up the OAuth consent screen with the app name, the
+     markcitadel.com domain and a privacy policy URL.
+   - Paste the client ID and secret into Supabase → Providers → **Google** →
+     Enable.
+4. **Authentication → Emails → SMTP:** Supabase's built-in mailer is
+   rate-limited (a few emails per hour), so plug in Resend, Postmark or SES
+   before launch. Optionally customize the magic-link template.
+
+### 4.3 Netlify site
+1. Push the repo to GitHub, then Netlify → **Add new site → Import from Git**.
+   `netlify.toml` already sets the build command `npm run build:web`, publish
+   dir `dist/public`, the functions dir and Node 20.
+2. Add every env var from section 3 (scopes: Builds + Functions; use
+   different Stripe keys for deploy previews if you like).
+3. Deploy. Check `https://<site>/api/v1/health` → `{"ok":true,…}`, then
+   sign in with Google and with a magic link. Signing in as `OWNER_EMAIL`
+   shows the owner panel on /pricing.
+4. **Domain management → Add domain** `markcitadel.com`. In Cloudflare DNS,
+   point it at Netlify (CNAME `@` → `<site>.netlify.app`, DNS-only/grey
+   cloud), and remove the old redirect rule to kimi.link. Update `APP_URL`
+   and the Supabase Site URL to the final domain.
+
+### 4.4 Stripe (test mode first, then live)
+1. Products: "MarkCitadel Pro" **$29/month recurring** → `STRIPE_PRICE_PRO`;
+   "Name Clearance Report" **$29 one-time** → `STRIPE_PRICE_REPORT`.
+2. Developers → API keys → `STRIPE_SECRET_KEY`.
+3. Developers → Webhooks → **Add endpoint**:
+   **`https://markcitadel.com/api/stripe/webhook`** (or the `*.netlify.app` URL).
+   Events: `checkout.session.completed`,
+   `checkout.session.async_payment_succeeded`,
    `customer.subscription.created`, `customer.subscription.updated`,
    `customer.subscription.deleted`, `invoice.payment_failed`,
-   `charge.refunded`. Copy the signing secret → `STRIPE_WEBHOOK_SECRET`.
-5. **Settings → Billing → Customer portal**: enable it, and allow cancel,
-   update payment method, and invoice history. Set the return URL to
-   `https://<domain>/pricing`.
-6. **Settings → Subscriptions and emails**: turn on Smart Retries, email
-   receipts for successful payments, and failed-payment emails. Set "after
-   all retries fail" → *cancel subscription* (that triggers the downgrade).
-7. Local testing: `stripe listen --forward-to localhost:3000/api/stripe/webhook`
-   (use the `whsec_` it prints), then buy with card `4242 4242 4242 4242`.
-   Confirm: Pro activates, the portal cancel downgrades you, and the report downloads.
-8. Run the DB migration (`npm run db:migrate`, or `db:push` on a fresh DB;
-   note that the original 0000–0002 `.sql` files were not in the upload, only
-   their snapshots, so on a brand-new database use `npm run db:push` against
-   `db/schema.ts`).
-9. Switch to Live mode: recreate the products/prices/webhook in live mode and
-   swap all four Stripe vars.
-10. If anyone paid under the old token flow, cancel/refund or migrate them
-    by hand in Stripe. The migration keeps them on Pro, but there's no
-    Stripe subscription behind it.
+   `charge.refunded`. Copy the signing secret → `STRIPE_WEBHOOK_SECRET`
+   → redeploy.
+4. Settings → Billing → **Customer portal**: enable cancel, update payment
+   method and invoices. Return URL: `https://markcitadel.com/pricing`.
+5. Settings → Subscriptions & emails: turn on Smart Retries, successful
+   payment receipts and failed-payment emails. "After all retries fail" →
+   cancel the subscription.
+6. Test with card `4242 4242 4242 4242`:
+   - Pro upgrade → the plan flips within seconds.
+   - Portal cancel → back to Free.
+   - Report purchase → the PDF downloads.
+   - The webhook log in Stripe shows 200s.
+7. Repeat steps 1–5 in **live** mode and swap the four Stripe env vars.
 
----
+### 4.5 Local development
+`cp .env.example .env`, fill it in (use the same Supabase project or a second
+"dev" one), then `npm install && npm run dev` → http://localhost:3000. Test
+webhooks with `stripe listen --forward-to localhost:3000/api/stripe/webhook`.
+`npx netlify-cli dev` also works if you want to run the real function wrapper.
 
-## 4. Hosting
-
-The server is a **long-running Node process** (Hono via `@hono/node-server`,
-`npm start` → `dist/boot.js`). It also keeps in-memory state that a
-serverless platform would lose or split between instances: the USPTO cache,
-the ppubs session, and the per-minute API rate limiter. It loads `pdfkit`
-from `node_modules` at runtime and needs **MySQL** (Drizzle `mysql2`, MySQL
-dialect).
-
-**Recommendation: Railway** (or Render or Fly.io). Run one Node service with
-`npm run build` then `npm start`, add a Railway **MySQL** plugin, and set
-`DATABASE_URL` from it. About $5 to $20/month at launch. Point
-markcitadel.com (Cloudflare) at it with a CNAME.
-
-Vercel isn't a good fit as-is: the in-memory limiter and cache break across
-serverless instances, PDF generation plus USPTO retries can hit function
-time limits, and Vercel has no MySQL (you'd need PlanetScale or another
-external MySQL, or a port to Postgres/Neon). Move only if you shift the
-cache and rate limits to Redis/Upstash.
-
-**Blocker before self-hosting:** login is "Sign in with Kimi" OAuth, tied to
-the Kimi platform app (`APP_ID`, `KIMI_AUTH_URL`). Off that platform you need
-your own auth: Auth.js, Clerk, Lucia, or simple email magic links. The user
-table keys on `unionId`, so map the new provider's id into it. The DB on the
-Kimi platform is also platform-managed, so export your data before moving.
-
----
+### 4.6 Existing data
+The old Kimi-hosted MySQL can't be exported with the code. Anyone who was
+"Pro" under the old token flow has to be re-subscribed through Stripe
+Checkout or handled by hand. There are no user accounts to carry over.
 
 ## 5. Go-to-market (small business owners naming companies)
 
@@ -231,27 +293,34 @@ leads per 100 checks.
 
 ## 6. Remaining risks
 
-- **Auth is platform-bound** (Kimi OAuth). You have to swap it to self-host.
 - **Trademark data isn't from an official API** (tmsearch internal
-  endpoint). Retries and stale cache soften outages, but a USPTO change can
-  break search. Long-term fix: index the bulk data yourself (see above).
-- **Report delivery:** the PDF is regenerated live on each download (data
-  can change, and if USPTO is down a download can show "data unavailable").
-  There's no "email me my report" yet (Stripe sends only the receipt), and
-  the download link is a bearer link. Next step: store the PDF in S3/R2 at
-  purchase time and email it with Resend/Postmark.
+  endpoint). Retries and the shared stale cache soften outages, but a USPTO
+  change can break search. Long-term fix: index the bulk data yourself.
+- **Netlify's 10s limit:** a cold start, a DB round-trip and a slow USPTO
+  response can add up. Patent fallback (ODP fails, then ppubs) and PDF
+  generation are the tightest paths. If you see 502/timeouts, ask Netlify to
+  raise the limit (up to 26s on paid plans), or move report generation to a
+  Background Function plus storage.
+- **The 6 MB request cap** on Netlify functions limits trademark image
+  uploads (the old server allowed 50 MB).
+- **Report delivery:** the PDF is regenerated on every download, nothing
+  emails it (only the Stripe receipt goes out), and the link is a bearer
+  link. Next step: store it in Supabase Storage at purchase and email it
+  with Resend.
+- **Supabase email:** the default SMTP is heavily rate-limited, so set up
+  custom SMTP before launch or magic links will fail under load.
 - **Legal:** the Terms and disclaimers were written by an AI, not a lawyer.
-  Get an attorney review, especially for the referral-fee arrangement (state
-  bar rules), privacy for stored leads (add a Privacy Policy), and the
-  refund policy.
-- **Migrations:** the original `0000–0002` SQL files are missing from the
-  upload (only snapshots). `0003` was hand-written, and its drizzle snapshot
-  wasn't regenerated. Run `npx drizzle-kit generate` against a dev DB to
-  resync before the next schema change.
-- **In-memory rate limits and cache** assume a single server instance.
-- **Not tested against live Stripe or a live database.** Only typecheck and
-  build were verified. Run the Stripe test-mode checklist above before
-  going live.
+  Have an attorney review them, especially the referral-fee arrangement
+  (state bar rules). A **Privacy Policy** is still missing, and both Google
+  OAuth verification and the stored leads require one.
+- **Not tested against live Stripe, Supabase or Netlify.**
+  - Verified: typecheck, the Vite and server builds, `netlify build
+    --offline`, and the bundled function locally (health 200, forged
+    webhook 400, signed webhook reaches the handler, pdfkit works inside
+    the bundle).
+  - Also verified: the schema and every upsert run correctly against an
+    embedded Postgres (PGlite).
+  - Still to do: run the 4.4 test-mode checklist end to end.
+- **Front-end bundle** is ~860 KB (code-splitting would help mobile load times).
 - **Competition:** free USPTO search and Trademarkia exist. The moat is
-  distribution (SEO, partners, TruDan) and the bundle (report plus attorney
-  intro), not the data.
+  distribution and the report-plus-attorney bundle.

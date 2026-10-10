@@ -7,6 +7,9 @@ import type {
   TrademarkStatus,
 } from "@contracts/types";
 import { env } from "../lib/env";
+import { and, eq, gt, lt } from "drizzle-orm";
+import { getDb } from "../queries/connection";
+import { apiCache } from "@db/schema";
 
 /**
  * Server-side client for USPTO public search systems.
@@ -29,39 +32,79 @@ import { env } from "../lib/env";
  * 6-hour fresh window is safe. Entries are kept up to 48h and served as
  * "stale" with a notice if USPTO is down (stale-if-error).
  */
-const cache = new Map<string, { data: unknown; storedAt: number }>();
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const STALE_MAX_MS = 48 * 60 * 60 * 1000;
-const CACHE_MAX_ENTRIES = 5000;
 
-function cached<T>(key: string): T | null {
-  const hit = cache.get(key);
+// Cache lives in Postgres (api_cache) so it survives serverless cold starts
+// and is shared by every function instance. A tiny per-instance memo avoids
+// repeat DB reads within one warm instance. Cache failures never break search.
+const memo = new Map<string, { data: unknown; storedAt: number }>();
+
+async function readCache(key: string): Promise<{ data: unknown; storedAt: number } | null> {
+  const m = memo.get(key);
+  if (m) return m;
+  try {
+    const [row] = await getDb()
+      .select()
+      .from(apiCache)
+      .where(and(eq(apiCache.key, key), gt(apiCache.staleUntil, new Date())));
+    if (!row) return null;
+    const hit = { data: row.value, storedAt: row.storedAt.getTime() };
+    if (memo.size > 200) memo.clear();
+    memo.set(key, hit);
+    return hit;
+  } catch (e) {
+    console.warn("[cache] read failed:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
+async function cached<T>(key: string): Promise<T | null> {
+  const hit = await readCache(key);
   if (hit && Date.now() - hit.storedAt < CACHE_TTL_MS) return hit.data as T;
   return null;
 }
 
-function staleCached<T>(key: string): { data: T; ageMs: number } | null {
-  const hit = cache.get(key);
+async function staleCached<T>(key: string): Promise<{ data: T; ageMs: number } | null> {
+  const hit = await readCache(key);
   if (!hit) return null;
   const ageMs = Date.now() - hit.storedAt;
-  if (ageMs > STALE_MAX_MS) {
-    cache.delete(key);
-    return null;
-  }
+  if (ageMs > STALE_MAX_MS) return null;
   return { data: hit.data as T, ageMs };
 }
 
-function store(key: string, data: unknown) {
-  if (cache.size >= CACHE_MAX_ENTRIES) {
-    // evict oldest ~10% (Map preserves insertion order)
-    let n = Math.ceil(CACHE_MAX_ENTRIES / 10);
-    for (const k of cache.keys()) {
-      cache.delete(k);
-      if (--n <= 0) break;
+async function store(key: string, data: unknown, ttlMs = CACHE_TTL_MS): Promise<void> {
+  const now = Date.now();
+  memo.set(key, { data, storedAt: now });
+  try {
+    const row = {
+      key: key.slice(0, 600),
+      value: data,
+      storedAt: new Date(now),
+      expiresAt: new Date(now + ttlMs),
+      staleUntil: new Date(now + Math.max(ttlMs, STALE_MAX_MS)),
+    };
+    await getDb()
+      .insert(apiCache)
+      .values(row)
+      .onConflictDoUpdate({
+        target: apiCache.key,
+        set: {
+          value: row.value,
+          storedAt: row.storedAt,
+          expiresAt: row.expiresAt,
+          staleUntil: row.staleUntil,
+        },
+      });
+    if (Math.random() < 0.01) {
+      void getDb()
+        .delete(apiCache)
+        .where(lt(apiCache.staleUntil, new Date()))
+        .catch(() => {});
     }
+  } catch (e) {
+    console.warn("[cache] write failed:", e instanceof Error ? e.message : e);
   }
-  cache.delete(key);
-  cache.set(key, { data, storedAt: Date.now() });
 }
 
 /** User-facing message when a USPTO system is down. */
@@ -75,8 +118,12 @@ export class UsptoUnavailableError extends Error {
   }
 }
 
-const REQUEST_TIMEOUT_MS = 12_000;
-const MAX_ATTEMPTS = 3;
+// Netlify synchronous functions time out at ~10s, so in serverless we give
+// each USPTO call one 8s budget (2 attempts max, sharing that budget).
+// On a long-running server we allow 12s per attempt and 3 attempts.
+const REQUEST_TIMEOUT_MS = env.isServerless ? 8_000 : 12_000;
+const MAX_ATTEMPTS = env.isServerless ? 2 : 3;
+const TOTAL_BUDGET_MS = env.isServerless ? 8_000 : 40_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -92,20 +139,24 @@ async function usptoFetch(
   attempts = MAX_ATTEMPTS,
 ): Promise<Response> {
   let lastErr = "unknown error";
+  const deadline = Date.now() + TOTAL_BUDGET_MS;
   for (let i = 0; i < attempts; i++) {
     if (i > 0) {
-      const backoff = 400 * 2 ** (i - 1) + Math.floor(Math.random() * 250);
+      const backoff = 300 * 2 ** (i - 1) + Math.floor(Math.random() * 200);
+      if (Date.now() + backoff + 1000 > deadline) break; // no time for another try
       await sleep(backoff);
     }
+    const timeLeft = Math.min(REQUEST_TIMEOUT_MS, deadline - Date.now());
+    if (timeLeft < 1000) break;
     try {
       const res = await fetch(url, {
         ...init,
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeLeft),
       });
       if (res.status === 429 || res.status >= 500) {
         lastErr = `HTTP ${res.status}`;
         const retryAfter = Number(res.headers.get("retry-after"));
-        if (retryAfter > 0 && retryAfter <= 5 && i < attempts - 1) {
+        if (retryAfter > 0 && retryAfter <= 3 && i < attempts - 1 && Date.now() + retryAfter * 1000 + 1000 < deadline) {
           await sleep(retryAfter * 1000);
         }
         if (i === attempts - 1) return res;
@@ -116,7 +167,7 @@ async function usptoFetch(
       lastErr =
         e instanceof Error
           ? e.name === "TimeoutError" || e.name === "AbortError"
-            ? `timed out after ${REQUEST_TIMEOUT_MS / 1000}s`
+            ? `timed out`
             : e.message
           : String(e);
     }
@@ -140,8 +191,13 @@ interface PatentSession {
 }
 
 let patentSession: PatentSession | null = null;
+const PPUBS_SESSION_KEY = "ppubs:session";
 
 async function getPatentSession(force = false): Promise<PatentSession> {
+  if (!force && !patentSession) {
+    // reuse a session another function instance already opened
+    patentSession = await cached<PatentSession>(PPUBS_SESSION_KEY);
+  }
   if (
     !force &&
     patentSession &&
@@ -161,6 +217,7 @@ async function getPatentSession(force = false): Promise<PatentSession> {
     throw new Error("USPTO patent session returned no token");
   }
   patentSession = { token, caseId: data.userCase.caseId, createdAt: Date.now() };
+  await store(PPUBS_SESSION_KEY, patentSession, 20 * 60 * 1000);
   return patentSession;
 }
 
@@ -565,7 +622,7 @@ async function searchPatentsLive(opts: {
     throw new Error("Paging beyond 1000 results is not supported");
 
   const cacheKey = `pat:${query}|${page}|${perPage}|${sort}`;
-  const hit = cached<PatentSearchResponse>(cacheKey);
+  const hit = await cached<PatentSearchResponse>(cacheKey);
   if (hit) return hit;
 
   // Official channel first
@@ -582,7 +639,7 @@ async function searchPatentsLive(opts: {
         results: data.results,
         source: "USPTO Open Data Portal",
       };
-      store(cacheKey, out);
+      await store(cacheKey, out);
       return out;
     } catch (e) {
       console.warn(
@@ -615,7 +672,7 @@ async function searchPatentsLive(opts: {
     results: data.patents.map(normalizePatent),
     source: "USPTO Patent Public Search",
   };
-  store(cacheKey, out);
+  await store(cacheKey, out);
   return out;
 }
 
@@ -752,7 +809,7 @@ async function searchTrademarksLive(opts: {
   const perPage = Math.min(50, Math.max(1, opts.perPage ?? 25));
 
   const cacheKey = `tm:${query}|${status}|${page}|${perPage}`;
-  const hit = cached<TrademarkSearchResponse>(cacheKey);
+  const hit = await cached<TrademarkSearchResponse>(cacheKey);
   if (hit) return hit;
 
   const esQuery = buildTrademarkQueryString(query, status);
@@ -786,7 +843,7 @@ async function searchTrademarksLive(opts: {
     results: (data.hits?.hits ?? []).map(normalizeTrademark),
     source: "USPTO Trademark Search",
   };
-  store(cacheKey, out);
+  await store(cacheKey, out);
   return out;
 }
 
@@ -1042,7 +1099,7 @@ function withStale<A extends { query: string }, R extends { notice?: string }>(
     try {
       return await live(a);
     } catch (e) {
-      const stale = staleCached<R>(keyFn(a));
+      const stale = await staleCached<R>(keyFn(a));
       if (stale) {
         console.warn("[uspto] serving stale cache:", e instanceof Error ? e.message : e);
         return { ...stale.data, notice: staleNotice(stale.ageMs) };
@@ -1067,14 +1124,14 @@ export const searchTrademarks = withStale(
 /** Count of live marks containing the exact name (cached, stale-if-error). */
 export async function getLiveTrademarkCount(name: string): Promise<number> {
   const key = `tmlive:${name.trim().toLowerCase()}`;
-  const fresh = cached<number>(key);
+  const fresh = await cached<number>(key);
   if (fresh !== null) return fresh;
   try {
     const n = await getLiveTrademarkCountLive(name);
-    store(key, n);
+    await store(key, n);
     return n;
   } catch (e) {
-    const stale = staleCached<number>(key);
+    const stale = await staleCached<number>(key);
     if (stale) return stale.data;
     throw e;
   }

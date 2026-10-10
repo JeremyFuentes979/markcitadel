@@ -362,7 +362,7 @@ export async function handleStripeEvent(event: Stripe.Event): Promise<void> {
   await db
     .insert(stripeEvents)
     .values({ id: event.id, type: event.type })
-    .onDuplicateKeyUpdate({ set: { type: event.type } });
+    .onConflictDoNothing({ target: stripeEvents.id });
 }
 
 // ─── Owner billing view (read-only; Stripe is the source of truth) ─────────

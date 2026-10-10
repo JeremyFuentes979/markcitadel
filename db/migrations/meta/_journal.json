@@ -1,33 +1,12 @@
 {
   "version": "7",
-  "dialect": "mysql",
+  "dialect": "postgresql",
   "entries": [
     {
       "idx": 0,
-      "version": "5",
-      "when": 1788051343362,
-      "tag": "0000_sync_constraints",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "5",
-      "when": 1788139052574,
-      "tag": "0001_billing_plans",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "5",
-      "when": 1788805787784,
-      "tag": "0002_site_analytics",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "5",
-      "when": 1791600000000,
-      "tag": "0003_stripe_billing",
+      "version": "7",
+      "when": 1791603542304,
+      "tag": "0000_baseline",
       "breakpoints": true
     }
   ]

@@ -1,4 +1,5 @@
-import { Routes, Route } from 'react-router'
+import { useEffect } from 'react'
+import { Routes, Route, useLocation } from 'react-router'
 import { Toaster } from "@/components/ui/sonner"
 import Home from './pages/Home'
 import SearchPage from './pages/SearchPage'
@@ -14,7 +15,17 @@ import ReportSuccessPage from './pages/ReportSuccessPage'
 import Login from "./pages/Login"
 import NotFound from "./pages/NotFound"
 
+function usePageviewBeacon() {
+  const { pathname } = useLocation()
+  useEffect(() => {
+    if (import.meta.env.DEV) return
+    const body = JSON.stringify({ path: pathname, ref: document.referrer })
+    navigator.sendBeacon?.('/api/pv', new Blob([body], { type: 'application/json' }))
+  }, [pathname])
+}
+
 export default function App() {
+  usePageviewBeacon()
   return (
     <>
       <Toaster />

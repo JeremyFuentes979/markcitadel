@@ -3,6 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import { apiKeys, apiUsage, type ApiKey } from "@db/schema";
 import { getUserPlan, planFor } from "./plans";
+import { hitRateLimit } from "./ratelimit";
 
 /**
  * API key authentication, rate limiting, and usage metering for the public
@@ -40,53 +41,21 @@ export async function createApiKey(
   const rawKey = KEY_PREFIX + randomBytes(24).toString("hex"); // pmk_ + 48 hex chars
   const keyHash = hashKey(rawKey);
   const prefix = rawKey.slice(0, 12);
-  const [res] = await db.insert(apiKeys).values({
-    userId,
-    name: name.slice(0, 100),
-    prefix,
-    keyHash,
-    plan: userPlan,
-  });
-  const id = Number((res as { insertId: bigint | number }).insertId);
-  const [key] = await db.select().from(apiKeys).where(eq(apiKeys.id, id));
+  const [key] = await db
+    .insert(apiKeys)
+    .values({
+      userId,
+      name: name.slice(0, 100),
+      prefix,
+      keyHash,
+      plan: userPlan,
+    })
+    .returning();
   return { key, rawKey };
 }
 
 export function hashKey(rawKey: string): string {
   return createHash("sha256").update(rawKey).digest("hex");
-}
-
-// ─── Rate limiting (per-minute, in-memory fixed window) ─────────────────────
-
-const minuteWindows = new Map<number, { windowStart: number; count: number }>();
-
-function checkRateLimit(
-  keyId: number,
-  perMinute: number,
-): {
-  allowed: boolean;
-  remaining: number;
-  resetInSec: number;
-} {
-  const now = Date.now();
-  const win = minuteWindows.get(keyId);
-  if (!win || now - win.windowStart >= 60_000) {
-    minuteWindows.set(keyId, { windowStart: now, count: 1 });
-    return { allowed: true, remaining: perMinute - 1, resetInSec: 60 };
-  }
-  if (win.count >= perMinute) {
-    return {
-      allowed: false,
-      remaining: 0,
-      resetInSec: Math.ceil((win.windowStart + 60_000 - now) / 1000),
-    };
-  }
-  win.count++;
-  return {
-    allowed: true,
-    remaining: perMinute - win.count,
-    resetInSec: Math.ceil((win.windowStart + 60_000 - now) / 1000),
-  };
 }
 
 // ─── Authentication + metering ──────────────────────────────────────────────
@@ -146,7 +115,7 @@ export async function authenticateApiKey(
   const plan = planFor(key.plan);
 
   // Per-minute rate limit
-  const rate = checkRateLimit(Number(key.id), plan.requestsPerMinute);
+  const rate = await hitRateLimit(`key:${key.id}`, plan.requestsPerMinute, 60);
   if (!rate.allowed) {
     return {
       ok: false,
@@ -176,7 +145,10 @@ export async function authenticateApiKey(
   await db
     .insert(apiUsage)
     .values({ apiKeyId: key.id, month, requests: 1 })
-    .onDuplicateKeyUpdate({ set: { requests: sql`${apiUsage.requests} + 1` } });
+    .onConflictDoUpdate({
+      target: [apiUsage.apiKeyId, apiUsage.month],
+      set: { requests: sql`${apiUsage.requests} + 1` },
+    });
   await db
     .update(apiKeys)
     .set({ lastUsedAt: new Date() })

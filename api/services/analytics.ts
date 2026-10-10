@@ -88,8 +88,8 @@ export async function getSiteStats(days = 30): Promise<SiteStats> {
   const totalsRow = (
     await db
       .select({
-        views: sql<number>`count(*)`,
-        uniqueVisitors: sql<number>`count(distinct ${pageviews.visitorHash})`,
+        views: sql<number>`count(*)::int`,
+        uniqueVisitors: sql<number>`count(distinct ${pageviews.visitorHash})::int`,
       })
       .from(pageviews)
       .where(human)
@@ -97,7 +97,7 @@ export async function getSiteStats(days = 30): Promise<SiteStats> {
 
   const botsRow = (
     await db
-      .select({ views: sql<number>`count(*)` })
+      .select({ views: sql<number>`count(*)::int` })
       .from(pageviews)
       .where(and(gte(pageviews.day, since), eq(pageviews.isBot, true)))
   )[0] ?? { views: 0 };
@@ -105,8 +105,8 @@ export async function getSiteStats(days = 30): Promise<SiteStats> {
   const byDay = await db
     .select({
       day: pageviews.day,
-      views: sql<number>`count(*)`,
-      visitors: sql<number>`count(distinct ${pageviews.visitorHash})`,
+      views: sql<number>`count(*)::int`,
+      visitors: sql<number>`count(distinct ${pageviews.visitorHash})::int`,
     })
     .from(pageviews)
     .where(human)
@@ -116,24 +116,24 @@ export async function getSiteStats(days = 30): Promise<SiteStats> {
   const topPages = await db
     .select({
       path: pageviews.path,
-      views: sql<number>`count(*)`,
-      visitors: sql<number>`count(distinct ${pageviews.visitorHash})`,
+      views: sql<number>`count(*)::int`,
+      visitors: sql<number>`count(distinct ${pageviews.visitorHash})::int`,
     })
     .from(pageviews)
     .where(human)
     .groupBy(pageviews.path)
-    .orderBy(desc(sql`count(*)`))
+    .orderBy(desc(sql`count(*)::int`))
     .limit(20);
 
   const refRows = await db
     .select({
       host: pageviews.referrer,
-      views: sql<number>`count(*)`,
+      views: sql<number>`count(*)::int`,
     })
     .from(pageviews)
     .where(human)
     .groupBy(pageviews.referrer)
-    .orderBy(desc(sql`count(*)`))
+    .orderBy(desc(sql`count(*)::int`))
     .limit(20);
 
   const referrers = refRows
