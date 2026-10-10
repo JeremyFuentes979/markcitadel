@@ -159,15 +159,18 @@ export async function createPortalLink(userId: number): Promise<string> {
 /** Create a one-time $29 Name Clearance Report Checkout Session. */
 export async function createReportCheckout(opts: {
   name: string;
+  classes?: number[];
   user?: { id: number; email: string | null; name: string | null };
 }): Promise<string> {
   const name = opts.name.trim().slice(0, 100);
+  const classes = (opts.classes ?? []).filter((n) => n >= 1 && n <= 45).slice(0, 12).join(",");
   const params: Stripe.Checkout.SessionCreateParams = {
     mode: "payment",
     line_items: [{ price: env.stripePriceReport, quantity: 1 }],
     metadata: {
       kind: "report",
       name,
+      classes,
       userId: opts.user ? String(opts.user.id) : "",
     },
     payment_intent_data: {
@@ -191,6 +194,7 @@ export async function createReportCheckout(opts: {
     .values({
       userId: opts.user?.id ?? null,
       name,
+      classes: classes || null,
       email: opts.user?.email ?? null,
       stripeSessionId: session.id,
       status: "pending",
@@ -205,7 +209,7 @@ export async function createReportCheckout(opts: {
  */
 export async function getPaidReport(
   sessionId: string,
-): Promise<{ name: string; email: string | null } | null> {
+): Promise<{ name: string; email: string | null; classes?: number[] } | null> {
   if (!/^cs_[A-Za-z0-9_]+$/.test(sessionId)) return null;
   const db = getDb();
   const [row] = await db
@@ -213,12 +217,13 @@ export async function getPaidReport(
     .from(reportPurchases)
     .where(eq(reportPurchases.stripeSessionId, sessionId));
   if (!row) return null;
-  if (row.status === "paid") return { name: row.name, email: row.email };
+  const classes = row.classes ? row.classes.split(",").map(Number).filter((n) => n >= 1 && n <= 45) : undefined;
+  if (row.status === "paid") return { name: row.name, email: row.email, classes };
   if (row.status !== "pending" || !env.stripeSecretKey) return null;
   const s = await stripe().checkout.sessions.retrieve(sessionId);
   if (s.payment_status !== "paid") return null;
   await markReportPaid(s);
-  return { name: row.name, email: s.customer_details?.email ?? row.email };
+  return { name: row.name, email: s.customer_details?.email ?? row.email, classes };
 }
 
 /** Reports tied to a signed-in account. */

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { trpc } from "@/providers/trpc";
 
 /** Paid upsell: unlock the full Name Clearance Report for a checked name. */
-export function ReportCTA({ name }: { name: string }) {
+export function ReportCTA({ name, classes }: { name: string; classes?: number[] }) {
   const info = trpc.billing.reportInfo.useQuery();
   const checkout = trpc.billing.checkoutReport.useMutation({
     onSuccess: (d) => {
@@ -22,7 +22,8 @@ export function ReportCTA({ name }: { name: string }) {
         Get the full Name Clearance Report for "{name}" — ${price}
       </div>
       <ul className="mt-2 text-sm text-slate-600 list-disc pl-5 space-y-1">
-        <li>The top live conflicting USPTO marks, with owners and serial numbers</li>
+        <li>Risk verdict for your classes, plus up to 10 scored conflicting marks with owners, classes and serial numbers</li>
+        <li>Who already owns the word, and why each mark was flagged</li>
         <li>Domain status, sound-alike risks, and a do-it-yourself checklist</li>
         <li>A clean PDF to share with your partner, designer, or attorney</li>
       </ul>
@@ -30,7 +31,7 @@ export function ReportCTA({ name }: { name: string }) {
         <Button
           className="bg-navy-800 hover:bg-navy-900"
           disabled={!available || checkout.isPending}
-          onClick={() => checkout.mutate({ name })}
+          onClick={() => checkout.mutate({ name, classes })}
         >
           <FileDown className="w-4 h-4" />
           {!available

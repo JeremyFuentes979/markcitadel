@@ -22,6 +22,9 @@ import { trpc } from "@/providers/trpc";
 import { cn } from "@/lib/utils";
 import { ReportCTA } from "@/components/ReportCTA";
 import { AttorneyLeadForm } from "@/components/AttorneyLeadForm";
+import { ClassPicker } from "@/components/ClassPicker";
+import { parseClassesParam } from "@contracts/conflicts";
+import { VerdictCard } from "@/components/VerdictCard";
 
 // ─── Checklist item shells ──────────────────────────────────────────────────
 
@@ -108,6 +111,7 @@ type ManualKey = (typeof MANUAL_KEYS)[number];
 export default function NameCheckPage() {
   const [params, setParams] = useSearchParams();
   const initial = params.get("name") ?? "";
+  const classes = parseClassesParam(params.get("classes"));
   const [value, setValue] = useState(initial);
   const [submitted, setSubmitted] = useState(initial);
   const [done, setDone] = useState<Record<ManualKey, boolean>>({
@@ -120,7 +124,7 @@ export default function NameCheckPage() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const check = trpc.search.nameCheck.useQuery(
-    { name: submitted },
+    { name: submitted, classes },
     { enabled: submitted.trim().length >= 2, retry: false },
   );
 
@@ -132,7 +136,7 @@ export default function NameCheckPage() {
     const n = value.trim();
     if (n.length < 2) return;
     setSubmitted(n);
-    setParams({ name: n }, { replace: true });
+    setParams({ name: n, classes: classes.join(",") }, { replace: true });
     setDone({ state: false, handles: false, companies: false, google: false, intl: false });
   };
 
@@ -148,11 +152,13 @@ export default function NameCheckPage() {
     ? "idle"
     : loading
       ? "loading"
-      : liveMarks < 0
+      : liveMarks < 0 || !d?.conflicts
         ? "warn"
-        : liveMarks === 0
+        : d.conflicts.verdict === "clear"
           ? "pass"
-          : "fail";
+          : d.conflicts.verdict === "high"
+            ? "fail"
+            : "warn";
 
   const domVerdict: Verdict = !submitted
     ? "idle"
@@ -215,6 +221,39 @@ export default function NameCheckPage() {
         {submitted && d?.degraded && (
           <div className="mt-6 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
             {d.degraded}
+          </div>
+        )}
+
+        <div className="mt-3">
+          <ClassPicker
+            value={classes}
+            onChange={(c) => {
+              const next = new URLSearchParams(params);
+              next.set("classes", c.join(","));
+              setParams(next, { replace: true });
+            }}
+          />
+        </div>
+
+        {submitted && (
+          <div className="mt-6">
+            <VerdictCard
+              data={d?.conflicts}
+              loading={loading}
+              error={check.error?.message}
+              maxConflicts={5}
+              footer={
+                d?.conflicts && d.conflicts.verdict !== "unknown" ? (
+                  <p className="mt-3 text-xs text-slate-600">
+                    Showing the top 5. The paid report lists up to 10 scored marks with owners,
+                    registration numbers and classes.{" "}
+                    <Link to={`/search?q=${enc}&type=trademarks&status=live&classes=${classes.join(",")}`} className="underline text-navy-700">
+                      Browse all live results
+                    </Link>
+                  </p>
+                ) : null
+              }
+            />
           </div>
         )}
 
@@ -457,7 +496,7 @@ export default function NameCheckPage() {
               .
             </div>
 
-            <ReportCTA name={submitted} />
+            <ReportCTA name={submitted} classes={classes} />
             <AttorneyLeadForm businessName={submitted} />
             <p className="text-xs text-slate-500">
               MarkCitadel is an information tool, not a law firm. Results are a

@@ -3,12 +3,12 @@ import { and, desc, eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { authedQuery, createRouter, publicQuery } from "./middleware";
 import {
-  getLiveTrademarkCount,
   phoneticVariants,
   searchPatents,
   searchTrademarks,
 } from "./services/uspto";
 import { checkDomains } from "./services/domains";
+import { checkTrademarkConflicts } from "./services/conflicts";
 import {
   checkWatchesForUser,
   listAlerts,
@@ -67,23 +67,45 @@ const searchRouter = createRouter({
    * Name-clearance bundle: live trademark count + exact domain availability +
    * sound-alike variants — the three checks we can answer with live data.
    */
+  /**
+   * Conflict summary: verdict + counts + top flagged live marks + top owners,
+   * so nobody has to page through hundreds of raw results.
+   */
+  trademarkCheck: publicQuery
+    .input(
+      z.object({
+        query: z.string().trim().min(2).max(100),
+        classes: z.array(z.number().int().min(1).max(45)).max(12).optional(),
+      }),
+    )
+    .query(({ input }) => checkTrademarkConflicts(input.query, input.classes)),
+
   nameCheck: publicQuery
-    .input(z.object({ name: z.string().min(2).max(60) }))
+    .input(
+      z.object({
+        name: z.string().min(2).max(60),
+        classes: z.array(z.number().int().min(1).max(45)).max(12).optional(),
+      }),
+    )
     .query(async ({ input }) => {
       const name = input.name.trim();
-      const [liveMarks, domains] = await Promise.all([
-        getLiveTrademarkCount(name).catch(() => -1),
+      const [conflicts, domains] = await Promise.all([
+        checkTrademarkConflicts(name, input.classes).catch(() => null),
         checkDomains(name).catch(() => []),
       ]);
+      const unknown = !conflicts || conflicts.verdict === "unknown";
       return {
         name,
-        liveMarks,
+        liveMarks: unknown ? -1 : conflicts.counts.live,
+        // Free tier: verdict, counts, top 5 conflicts. Full list + owners in the paid report.
+        conflicts: conflicts
+          ? { ...conflicts, topConflicts: conflicts.topConflicts.slice(0, 5) }
+          : null,
         domains,
         soundAlikes: phoneticVariants(name),
-        degraded:
-          liveMarks < 0
-            ? "USPTO's trademark search isn't responding right now, so the trademark count is missing. Domain and sound-alike checks still ran — try again in a few minutes."
-            : null,
+        degraded: unknown
+          ? "USPTO's trademark search isn't responding right now, so the trademark check is missing. Domain and sound-alike checks still ran. Try again in a few minutes."
+          : conflicts.degraded,
       };
     }),
 });
@@ -332,7 +354,12 @@ const billingRouter = createRouter({
   })),
 
   checkoutReport: publicQuery
-    .input(z.object({ name: z.string().trim().min(2).max(60) }))
+    .input(
+      z.object({
+        name: z.string().trim().min(2).max(60),
+        classes: z.array(z.number().int().min(1).max(45)).max(12).optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       if (!reportsConfigured()) {
         throw new TRPCError({
@@ -341,7 +368,11 @@ const billingRouter = createRouter({
         });
       }
       return {
-        url: await createReportCheckout({ name: input.name, user: ctx.user }),
+        url: await createReportCheckout({
+          name: input.name,
+          classes: input.classes,
+          user: ctx.user,
+        }),
       };
     }),
 

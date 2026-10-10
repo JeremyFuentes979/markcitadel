@@ -81,6 +81,7 @@ CREATE TABLE "report_purchases" (
 	"id" bigserial PRIMARY KEY NOT NULL,
 	"user_id" bigint,
 	"name" varchar(100) NOT NULL,
+	"classes" varchar(100),
 	"email" varchar(320),
 	"stripe_session_id" varchar(255) NOT NULL,
 	"stripe_payment_intent_id" varchar(255),
@@ -183,3 +184,6 @@ REVOKE ALL ON TABLE public."stripe_events" FROM anon, authenticated;
 REVOKE ALL ON TABLE public."users" FROM anon, authenticated;
 REVOKE ALL ON TABLE public."watches" FROM anon, authenticated;
 
+
+-- Upgrading an existing database created before the conflict-summary release:
+-- ALTER TABLE "report_purchases" ADD COLUMN IF NOT EXISTS "classes" varchar(100);

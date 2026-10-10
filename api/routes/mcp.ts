@@ -6,6 +6,7 @@ import {
   searchTrademarksByImage,
 } from "../services/uspto";
 import { authenticateApiKey } from "../services/apikeys";
+import { checkTrademarkConflicts, conflictSummaryText } from "../services/conflicts";
 import type {
   PatentSort,
   TrademarkResult,
@@ -40,6 +41,27 @@ mcp.use(
 const PROTOCOL_VERSION = "2025-06-18";
 
 const TOOLS = [
+  {
+    name: "check_trademark",
+    description:
+      "Answer 'is this business/brand name taken?' with a verdict (HIGH RISK / POSSIBLE CONFLICT / LOOKS CLEAR), " +
+      "counts (total, live, live in the user's classes), the top flagged live USPTO marks with reasons " +
+      "(exact, sound-alike, contains, similar spelling; class overlap; strong owners), and the top owners of the word. " +
+      "Prefer this over search_trademarks when the user wants to know if they can use a name. Not legal advice.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Business or brand name to check" },
+        classes: {
+          type: "array",
+          items: { type: "integer", minimum: 1, maximum: 45 },
+          description:
+            "Nice classes for the user's goods/services, e.g. [35, 37] for home services; default [9, 35, 42, 45] (software/online)",
+        },
+      },
+      required: ["name"],
+    },
+  },
   {
     name: "search_patents",
     description:
@@ -139,6 +161,16 @@ async function callTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<{ content: { type: string; text: string }[]; isError?: boolean }> {
+  if (name === "check_trademark") {
+    const q = String(args.name ?? args.query ?? "").trim();
+    if (q.length < 2) return { isError: true, ...textResult("name is required") };
+    const classes = Array.isArray(args.classes)
+      ? args.classes.map(Number).filter((n) => n >= 1 && n <= 45)
+      : undefined;
+    const summary = await checkTrademarkConflicts(q, classes);
+    return textResult(conflictSummaryText(summary));
+  }
+
   if (name === "search_patents") {
     const query = String(args.query ?? "").trim();
     if (!query) return { isError: true, ...textResult("query is required") };

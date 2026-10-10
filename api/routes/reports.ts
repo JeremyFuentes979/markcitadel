@@ -21,6 +21,7 @@ reports.get("/:file", async (c) => {
   try {
     const pdf = await buildNameCheckReport(purchase.name, {
       purchasedBy: purchase.email,
+      classes: purchase.classes,
     });
     const safe = purchase.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
     c.header("Content-Type", "application/pdf");

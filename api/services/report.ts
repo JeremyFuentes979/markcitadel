@@ -1,9 +1,7 @@
 import PDFKit from "pdfkit";
-import {
-  getLiveTrademarkCount,
-  phoneticVariants,
-  searchTrademarks,
-} from "./uspto";
+import { phoneticVariants } from "./uspto";
+import { checkTrademarkConflicts } from "./conflicts";
+import { NICE_CLASSES } from "@contracts/conflicts";
 import { checkDomains, nameToLabel } from "./domains";
 
 /**
@@ -41,18 +39,17 @@ export const REPORT_DISCLAIMER =
 
 export async function buildNameCheckReport(
   nameRaw: string,
-  opts: { purchasedBy?: string | null } = {},
+  opts: { purchasedBy?: string | null; classes?: number[] } = {},
 ): Promise<Buffer> {
   const name = nameRaw.trim();
   const label = nameToLabel(name);
 
-  const [liveMarks, domains, liveHits] = await Promise.all([
-    getLiveTrademarkCount(name).catch(() => -1),
+  const [conflicts, domains] = await Promise.all([
+    checkTrademarkConflicts(name, opts.classes).catch(() => null),
     checkDomains(name).catch(() => []),
-    searchTrademarks({ query: name, status: "live", perPage: 10 })
-      .then((r) => r.results)
-      .catch(() => []),
   ]);
+  const known = !!conflicts && conflicts.verdict !== "unknown";
+  const liveMarks = known ? conflicts!.counts.live : -1;
   const soundAlikes = phoneticVariants(name);
   const comTaken = domains.some(
     (d) => d.domain.endsWith(".com") && d.status === "taken",
@@ -131,65 +128,78 @@ export async function buildNameCheckReport(
     );
   hr();
 
-  // ── Bottom line ──
+  // ── Bottom line (conflict verdict) ──
   sectionTitle("Bottom line");
-  const clearish = liveMarks === 0 && !comTaken;
-  if (liveMarks === -1) {
+  if (!known) {
     body(
-      "Live trademark data could not be reached when this report was generated — re-run the check before relying on it.",
+      "Live trademark data could not be reached when this report was generated. Re-download it in a few minutes before relying on it.",
       AMBER,
     );
-  } else if (clearish) {
-    body(
-      `No live USPTO trademarks match "${name}" and the .com domain is available. That clears the two biggest hurdles — but complete the manual checks in this report (state registrations, web presence, international) before committing.`,
-      GREEN,
-    );
   } else {
-    const bits: string[] = [];
-    if (liveMarks > 0)
-      bits.push(
-        `${liveMarks} live USPTO trademark${liveMarks === 1 ? "" : "s"} match "${name}"`,
-      );
-    if (comTaken) bits.push(`the .com domain is taken`);
-    body(
-      `Caution: ${bits.join(" and ")}. That doesn't automatically block you — what matters is whether those marks cover your industry — but review them before spending money on branding or filing.`,
-      RED,
-    );
+    const c = conflicts!;
+    const color = c.verdict === "high" ? RED : c.verdict === "possible" ? AMBER : GREEN;
+    const label = c.verdict === "high" ? "HIGH RISK" : c.verdict === "possible" ? "POSSIBLE CONFLICT" : "LOOKS CLEAR";
+    doc.font("Helvetica-Bold").fontSize(15).fillColor(color).text(label);
+    doc.font("Helvetica-Bold").fontSize(10.5).fillColor(SLATE).text(c.headline, { width: W });
+    doc.moveDown(0.2);
+    body(c.explanation);
+    if (comTaken) body("Also: the exact .com domain is taken.", MUTED);
+    if (c.degraded) body(c.degraded, AMBER);
   }
   doc.moveDown(0.6);
 
-  // ── 1. USPTO trademarks ──
-  sectionTitle("1. USPTO trademark search");
-  if (liveMarks === -1) {
+  // ── 1. USPTO trademark analysis ──
+  sectionTitle("1. USPTO trademark analysis");
+  if (!known) {
     body("Live data unavailable at generation time.", AMBER);
-  } else if (liveMarks === 0) {
-    body(`No live federal trademarks match "${name}". Clear.`, GREEN);
   } else {
+    const c = conflicts!;
     body(
-      `${liveMarks} live mark${liveMarks === 1 ? "" : "s"} found. Top matches:`,
-      statusColor(false),
-    );
-    doc.moveDown(0.3);
-    for (const m of liveHits.slice(0, 10)) {
-      const line = [
-        m.wordmark || "(design mark)",
-        m.registered ? "Registered" : "Pending",
-        m.owner ? `— ${m.owner}` : "",
-        m.serialNumber ? `(SN ${m.serialNumber})` : "",
-      ]
-        .filter(Boolean)
-        .join("  ");
-      doc
-        .font("Helvetica")
-        .fontSize(9.5)
-        .fillColor(SLATE)
-        .text(`•  ${line}`, { indent: 8, width: W });
-    }
-    doc.moveDown(0.2);
-    body(
-      `Review the full records at tsdr.uspto.gov or run the search at markcitadel.com/search.`,
+      `Classes analyzed: ${c.classes.map((n) => `${n} (${NICE_CLASSES[n] ?? ""})`).join(", ")}.`,
       MUTED,
     );
+    body(
+      `${c.counts.total.toLocaleString()} federal marks match "${name}" or its variants (exact, contained, sound-alike, near-spellings): ` +
+        `${c.counts.live.toLocaleString()} live, ${c.counts.liveInYourClasses.toLocaleString()} live in your classes, ` +
+        `${c.counts.exactLive.toLocaleString()} live with the identical wording. We scored the ${c.counts.analyzed} most relevant live marks.`,
+    );
+    doc.moveDown(0.3);
+    if (c.topOwners.length) {
+      doc.font("Helvetica-Bold").fontSize(10).fillColor(SLATE).text("Who already owns this word");
+      for (const o of c.topOwners)
+        doc
+          .font("Helvetica")
+          .fontSize(9.5)
+          .fillColor(SLATE)
+          .text(`•  ${o.owner}: ${o.liveMarks} live mark${o.liveMarks === 1 ? "" : "s"} (classes ${o.classes.join(", ") || "n/a"})`, { indent: 8, width: W });
+      doc.moveDown(0.3);
+    }
+    if (c.topConflicts.length === 0) {
+      body("No live marks scored as a meaningful conflict.", GREEN);
+    } else {
+      doc.font("Helvetica-Bold").fontSize(10).fillColor(SLATE).text("Most relevant live marks (highest risk first)");
+      doc.moveDown(0.2);
+      for (const m of c.topConflicts) {
+        if (doc.y > doc.page.height - 120) doc.addPage();
+        doc
+          .font("Helvetica-Bold")
+          .fontSize(10)
+          .fillColor(m.score >= 75 ? RED : m.score >= 40 ? AMBER : SLATE)
+          .text(`${m.wordmark}  ·  risk ${m.score}/100`, { indent: 8, width: W });
+        doc
+          .font("Helvetica")
+          .fontSize(9)
+          .fillColor(SLATE)
+          .text(
+            `${m.owner ?? "Unknown owner"}  ·  ${m.registered ? `Reg. ${m.registrationNumber ?? ""}` : "Pending application"}  ·  SN ${m.serialNumber}  ·  Classes ${m.classes.join(", ") || "n/a"}`,
+            { indent: 18, width: W - 10 },
+          );
+        doc.font("Helvetica").fontSize(9).fillColor(MUTED).text(`Why flagged: ${m.reasons.join("; ")}.`, { indent: 18, width: W - 10 });
+        doc.moveDown(0.25);
+      }
+    }
+    doc.moveDown(0.2);
+    body("Verify any mark at tsdr.uspto.gov using its serial number (SN).", MUTED);
   }
   doc.moveDown(0.6);
 

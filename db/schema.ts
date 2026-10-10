@@ -203,6 +203,8 @@ export const reportPurchases = pgTable("report_purchases", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
   userId: fk("user_id").references(() => users.id, { onDelete: "set null" }),
   name: varchar("name", { length: 100 }).notNull(),
+  /** Nice classes the buyer picked, e.g. "9,35,42,45" (empty = defaults). */
+  classes: varchar("classes", { length: 100 }),
   email: varchar("email", { length: 320 }),
   stripeSessionId: varchar("stripe_session_id", { length: 255 })
     .notNull()

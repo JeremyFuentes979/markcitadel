@@ -1,4 +1,7 @@
 import { useState } from "react";
+import { ClassPicker } from "@/components/ClassPicker";
+import { parseClassesParam } from "@contracts/conflicts";
+import { VerdictCard } from "@/components/VerdictCard";
 import { useNavigate, useSearchParams } from "react-router";
 import {
   BellPlus,
@@ -109,7 +112,9 @@ export default function SearchPage() {
 
   const q = params.get("q") ?? "";
   const type = (params.get("type") ?? "trademarks") as SearchType;
-  const status = (params.get("status") ?? "all") as TrademarkStatus;
+  const status = (params.get("status") ?? "live") as TrademarkStatus;
+  const classes = parseClassesParam(params.get("classes"));
+  const [showAll, setShowAll] = useState(false);
   const sort = (params.get("sort") ?? "newest") as PatentSort;
   const page = Math.max(1, parseInt(params.get("page") ?? "1", 10) || 1);
 
@@ -149,13 +154,22 @@ export default function SearchPage() {
 
   const onSearch = (query: string, t: SearchType) =>
     navigate(
-      `/search?q=${encodeURIComponent(query)}&type=${t}&status=all&sort=newest`,
+      `/search?q=${encodeURIComponent(query)}&type=${t}&status=live&sort=newest`,
     );
 
   const tmQuery = trpc.search.trademarks.useQuery(
     { query: q, status, page, perPage: 25 },
     { enabled: type === "trademarks" && !!q, placeholderData: (p) => p },
   );
+  // Verdict layer: skip for serial numbers / fielded power-user syntax
+  const isNameQuery =
+    q.trim().length >= 2 && !/^\d{6,8}$/.test(q.trim()) && !/^[a-z]+:/i.test(q.trim());
+  const checkQuery = trpc.search.trademarkCheck.useQuery(
+    { query: q.trim().slice(0, 100), classes },
+    { enabled: type === "trademarks" && isNameQuery, retry: false, staleTime: 5 * 60_000 },
+  );
+  const listOpen = showAll || page > 1 || !isNameQuery;
+
   const patQuery = trpc.search.patents.useQuery(
     { query: q, page, perPage: 25, sort },
     { enabled: type === "patents" && !!q, placeholderData: (p) => p },
@@ -242,31 +256,69 @@ export default function SearchPage() {
               </Select>
             </div>
 
-            {tmQuery.isLoading && <LoadingList />}
-            {tmQuery.error && <ErrorBox message={tmQuery.error.message} />}
-            {tmQuery.data && tmQuery.data.results.length === 0 && (
-              <Empty query={q} />
-            )}
-            <div className="space-y-3 mt-5">
-              {tmQuery.data?.results.map((tm) => (
-                <TrademarkCard
-                  key={tm.serialNumber}
-                  tm={tm}
-                  onOpen={() => setSelectedTm(tm)}
+            {isNameQuery && (
+              <div className="mt-4 space-y-3">
+                <ClassPicker
+                  value={classes}
+                  onChange={(c) => setParam("classes", c.join(","))}
                 />
-              ))}
-            </div>
-            {tmQuery.data && (
-              <Pagination
-                page={page}
-                totalPages={tmQuery.data.totalPages}
-                onPage={(p) => setParam("page", String(p))}
-              />
-            )}
-            {tmQuery.isFetching && !tmQuery.isLoading && (
-              <div className="flex justify-center mt-4 text-slate-400">
-                <LoaderCircle className="w-5 h-5 animate-spin" />
+                <VerdictCard
+                  data={checkQuery.data}
+                  loading={checkQuery.isFetching}
+                  error={checkQuery.error?.message}
+                  footer={
+                    checkQuery.data && checkQuery.data.verdict !== "unknown" ? (
+                      <div className="mt-3 text-sm">
+                        <a
+                          href={`/namecheck?name=${encodeURIComponent(q)}&classes=${classes.join(",")}`}
+                          className="font-medium text-navy-700 underline"
+                        >
+                          Run the full name check and get the clearance report →
+                        </a>
+                      </div>
+                    ) : null
+                  }
+                />
               </div>
+            )}
+
+            {!listOpen ? (
+              <button
+                onClick={() => setShowAll(true)}
+                className="mt-5 w-full rounded-xl border border-dashed border-slate-300 bg-white py-3 text-sm font-medium text-slate-700 hover:border-navy-400 hover:text-navy-700"
+              >
+                Show all {tmQuery.data ? tmQuery.data.total.toLocaleString() : ""}{" "}
+                {status === "live" ? "live " : status === "dead" ? "dead " : ""}results
+              </button>
+            ) : (
+              <>
+            {tmQuery.isLoading && <LoadingList />}
+              {tmQuery.error && <ErrorBox message={tmQuery.error.message} />}
+              {tmQuery.data && tmQuery.data.results.length === 0 && (
+                <Empty query={q} />
+              )}
+              <div className="space-y-3 mt-5">
+                {tmQuery.data?.results.map((tm) => (
+                  <TrademarkCard
+                    key={tm.serialNumber}
+                    tm={tm}
+                    onOpen={() => setSelectedTm(tm)}
+                  />
+                ))}
+              </div>
+              {tmQuery.data && (
+                <Pagination
+                  page={page}
+                  totalPages={tmQuery.data.totalPages}
+                  onPage={(p) => setParam("page", String(p))}
+                />
+              )}
+              {tmQuery.isFetching && !tmQuery.isLoading && (
+                <div className="flex justify-center mt-4 text-slate-400">
+                  <LoaderCircle className="w-5 h-5 animate-spin" />
+                </div>
+              )}
+              </>
             )}
             <TrademarkDetail
               tm={selectedTm}

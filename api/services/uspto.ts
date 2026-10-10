@@ -43,6 +43,7 @@ const memo = new Map<string, { data: unknown; storedAt: number }>();
 async function readCache(key: string): Promise<{ data: unknown; storedAt: number } | null> {
   const m = memo.get(key);
   if (m) return m;
+  if (!env.databaseUrl) return null; // no DB configured (local scripts/tests)
   try {
     const [row] = await getDb()
       .select()
@@ -54,7 +55,7 @@ async function readCache(key: string): Promise<{ data: unknown; storedAt: number
     memo.set(key, hit);
     return hit;
   } catch (e) {
-    console.warn("[cache] read failed:", e instanceof Error ? e.message : e);
+    console.warn("[cache] read failed:", (e instanceof Error ? e.message : String(e)).slice(0, 160));
     return null;
   }
 }
@@ -76,6 +77,7 @@ async function staleCached<T>(key: string): Promise<{ data: T; ageMs: number } |
 async function store(key: string, data: unknown, ttlMs = CACHE_TTL_MS): Promise<void> {
   const now = Date.now();
   memo.set(key, { data, storedAt: now });
+  if (!env.databaseUrl) return;
   try {
     const row = {
       key: key.slice(0, 600),
@@ -103,7 +105,7 @@ async function store(key: string, data: unknown, ttlMs = CACHE_TTL_MS): Promise<
         .catch(() => {});
     }
   } catch (e) {
-    console.warn("[cache] write failed:", e instanceof Error ? e.message : e);
+    console.warn("[cache] write failed:", (e instanceof Error ? e.message : String(e)).slice(0, 160));
   }
 }
 
@@ -1141,4 +1143,90 @@ if (!env.usptoOdpApiKey) {
   console.warn(
     "[uspto] USPTO_ODP_API_KEY is not set — patent search will use the unofficial Patent Public Search session. Get an official key at data.uspto.gov/apikey.",
   );
+}
+
+// ─── Raw trademark queries for the conflict-summary layer ───────────────────
+
+export { escapeQueryString as escapeTmQuery };
+
+export interface RawTmHit {
+  serialNumber: string;
+  wordmark: string;
+  owner: string | null;
+  classes: number[];
+  alive: boolean;
+  registered: boolean;
+  statusCode: number | null;
+  status: string | null;
+  registrationNumber: string | null;
+  filingDate: string | null;
+  url: string;
+}
+
+const RAW_FIELDS = [
+  "id", "wordmark", "ownerName", "internationalClass", "alive", "registered",
+  "statusCode", "statusDescription", "registrationId", "filedDate",
+];
+
+/** "IC 009" / "009" / "9" → 9 (Nice classes 1-45 only). */
+export function parseNiceClass(s: string): number | null {
+  const m = /(\d{1,3})/.exec(s);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return n >= 1 && n <= 45 ? n : null;
+}
+
+/**
+ * One trademark-index query returning lean records + total count.
+ * Cached in Postgres; serves stale on failure; throws UsptoUnavailableError
+ * if USPTO is down and nothing is cached.
+ */
+export async function tmRawQuery(
+  es: string,
+  size: number,
+): Promise<{ total: number; hits: RawTmHit[] }> {
+  const key = `tmraw:${size}:${es}`;
+  const fresh = await cached<{ total: number; hits: RawTmHit[] }>(key);
+  if (fresh) return fresh;
+  try {
+    const res = await usptoFetch(TMSEARCH, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: { query_string: { query: es } },
+        size,
+        track_total_hits: true,
+        _source: RAW_FIELDS,
+      }),
+    });
+    if (!res.ok) throw new UsptoUnavailableError(`HTTP ${res.status}`);
+    const data = (await res.json()) as EsResponse;
+    if (data.error) throw new Error(String(data.error));
+    const hits: RawTmHit[] = (data.hits?.hits ?? []).map((h) => {
+      const s = h.source;
+      const serial = String(s.id ?? h.id);
+      return {
+        serialNumber: serial,
+        wordmark: s.wordmark ? String(s.wordmark) : "",
+        owner: asStrArray(s.ownerName)[0] ?? null,
+        classes: asStrArray(s.internationalClass)
+          .map(parseNiceClass)
+          .filter((n): n is number => n !== null),
+        alive: s.alive === true,
+        registered: s.registered === true,
+        statusCode: typeof s.statusCode === "number" ? s.statusCode : null,
+        status: s.statusDescription ? String(s.statusDescription) : null,
+        registrationNumber: s.registrationId ? String(s.registrationId) : null,
+        filingDate: isoDate(s.filedDate),
+        url: `https://tsdr.uspto.gov/#caseNumber=${serial}&caseSearchType=US_APPLICATION&caseType=DEFAULT&searchType=statusSearch`,
+      };
+    });
+    const out = { total: data.hits?.totalValue ?? 0, hits };
+    await store(key, out);
+    return out;
+  } catch (e) {
+    const stale = await staleCached<{ total: number; hits: RawTmHit[] }>(key);
+    if (stale) return stale.data;
+    throw e;
+  }
 }

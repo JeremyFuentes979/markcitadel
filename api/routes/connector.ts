@@ -8,6 +8,7 @@ import {
   searchTrademarksByImage,
 } from "../services/uspto";
 import { buildNameCheckReport } from "../services/report";
+import { checkTrademarkConflicts } from "../services/conflicts";
 import { authenticateApiKey } from "../services/apikeys";
 import type { PatentSort, TrademarkStatus } from "@contracts/types";
 
@@ -114,6 +115,32 @@ connector.get("/patents/search", async (c) => {
         error: "UPSTREAM_ERROR",
         message: e instanceof Error ? e.message : "USPTO search failed",
       },
+      502,
+    );
+  }
+});
+
+/**
+ * Conflict summary: verdict (high / possible / clear), counts, top flagged
+ * live marks with reasons, and top owners, for a name + optional classes.
+ */
+connector.get("/trademarks/check", async (c) => {
+  const denied = await requireKeyUnlessInternal(c);
+  if (denied) return denied;
+  const q = (c.req.query("q") ?? c.req.query("name") ?? "").trim();
+  if (q.length < 2 || q.length > 100) {
+    return c.json({ error: "BAD_PARAM", message: "Provide q (2-100 characters)." }, 400);
+  }
+  const classes = (c.req.query("classes") ?? "")
+    .split(",")
+    .map((x) => parseInt(x, 10))
+    .filter((n) => n >= 1 && n <= 45)
+    .slice(0, 12);
+  try {
+    return c.json(await checkTrademarkConflicts(q, classes.length ? classes : undefined));
+  } catch (e) {
+    return c.json(
+      { error: "UPSTREAM_ERROR", message: e instanceof Error ? e.message : "Check failed" },
       502,
     );
   }
@@ -341,6 +368,24 @@ connector.get("/openapi.json", (c) => {
             "429": { description: "Rate limit or monthly quota exceeded" },
             "502": { description: "USPTO upstream error" },
           },
+        },
+      },
+      "/api/v1/trademarks/check": {
+        get: {
+          operationId: "checkTrademark",
+          summary:
+            "Is this name taken? Verdict (high / possible / clear) with counts, the top flagged live marks and reasons, and the top owners",
+          parameters: [
+            { name: "q", in: "query", required: true, schema: { type: "string" }, description: "Business or brand name" },
+            {
+              name: "classes",
+              in: "query",
+              required: false,
+              schema: { type: "string" },
+              description: "Comma-separated Nice classes for your goods/services (default 9,35,42,45)",
+            },
+          ],
+          responses: { "200": { description: "Conflict summary (not legal advice)" } },
         },
       },
       "/api/v1/trademarks/search": {

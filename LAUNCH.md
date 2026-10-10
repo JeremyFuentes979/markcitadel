@@ -140,6 +140,58 @@ one the USPTO website uses, which isn't an official API. Official options:
 - A long-running Node server still works (`npm run build && npm start`) if
   you ever leave Netlify.
 
+## 2b. Trademark conflict summary ("is this name taken?")
+
+Searching "citadel" used to return roughly 1,000 pages of raw results. Now
+the answer comes first.
+
+- **Server:** `api/services/conflicts.ts`. For each name it runs 5 USPTO
+  queries **in parallel**:
+  1. Live marks matching an exact phrase, a contains-wildcard, a fuzzy
+     match (~1 edit for names of 6+ letters), sound-alike spellings, and the
+     individual words of multi-word names (up to 250 marks).
+  2. For compound names of 8+ letters, the 5+ letter pieces (so MARKCITADEL
+     finds CITADEL), up to 100 marks.
+  3. A count of all statuses.
+  4. A count of live marks in your classes.
+  5. A count of exact live matches.
+
+  All queries go through the Postgres cache (`api_cache`) and serve stale
+  results if USPTO is down. Each call stays inside the 8s Netlify budget;
+  real runs took 0.3 to 0.8s uncached.
+- **Scoring (0–100)** for each live mark is wording similarity × status ×
+  class overlap, plus an owner boost:
+  - Wording similarity: exact; sound-alike (double metaphone plus an edit
+    ratio); contains as a word; near spelling (Levenshtein, stricter for
+    short names); your name contains the mark; shares a word.
+  - Status: registered counts more than pending.
+  - Class overlap with "What's your business?" (default 9, 35, 42, 45).
+  - Owner strength: an owner with 5+ live marks for the word adds 10.
+    Owners with 15+ are treated as possibly famous, so the class penalty
+    mostly drops away.
+- **Verdict:** High risk (top score ≥75), Possible conflict (≥40), Looks
+  clear, or Unavailable. The response includes counts (total, live, live in
+  your classes, exact live), the top 10 flagged marks (at most 2 per owner)
+  with reasons, and the top owners. Every response carries a "not legal
+  advice" note.
+- **API:** `GET /api/v1/trademarks/check?q=NAME&classes=9,35,42,45` (also
+  in `/openapi.json`); tRPC `search.trademarkCheck`; MCP tool
+  `check_trademark`.
+- **UI:**
+  - Trademark search now defaults to **Live only**. A class picker and the
+    verdict card (counts, who owns the word, top conflicts) sit at the top.
+    The raw list is collapsed under "Show all N results".
+  - Name check shows the verdict card with the top 5. The paid report
+    (verdict, owners, all 10 scored marks with reasons) uses the classes
+    the buyer picked, stored in the new `report_purchases.classes` column.
+- **DB change:** `db/migrations/0001_report_classes.sql`. A fresh
+  `supabase/schema.sql` already includes it. For an existing database, run
+  the `ALTER TABLE` at the bottom of that file.
+- **Tuning:** thresholds live at the top of the verdict logic in
+  `conflicts.ts`. These are heuristics, not legal standards. Review a sample
+  of real checks with a partner attorney before marketing the verdicts
+  heavily.
+
 ## 3. Environment variables
 
 Set these in Netlify (**Site configuration → Environment variables**). For
@@ -321,6 +373,11 @@ leads per 100 checks.
   - Also verified: the schema and every upsert run correctly against an
     embedded Postgres (PGlite).
   - Still to do: run the 4.4 test-mode checklist end to end.
+- **Conflict scores are heuristics:**
+  - Owner counts come from the sample we fetch (up to 250 live marks), so
+    huge words (e.g. "nike", 1,115 live) under-count owners.
+  - Design-only marks and translations aren't compared.
+  - Sound-alike matching is English-centric.
 - **Front-end bundle** is ~860 KB (code-splitting would help mobile load times).
 - **Competition:** free USPTO search and Trademarkia exist. The moat is
   distribution and the report-plus-attorney bundle.
