@@ -6,6 +6,8 @@ import { appRouter } from "./router";
 import { createContext } from "./context";
 import { connector } from "./routes/connector";
 import { mcp } from "./routes/mcp";
+import { stripeWebhook } from "./routes/stripe";
+import { reports } from "./routes/reports";
 import { env } from "./lib/env";
 import { createOAuthCallbackHandler } from "./kimi/auth";
 import { Paths } from "@contracts/constants";
@@ -24,6 +26,8 @@ app.use("/api/trpc/*", async (c) => {
 });
 app.route("/api/v1", connector);
 app.route("/api/mcp", mcp);
+app.route("/api/stripe", stripeWebhook);
+app.route("/api/reports", reports);
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 
 /**

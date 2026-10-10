@@ -33,6 +33,8 @@ export interface PatentSearchResponse {
   totalPages: number;
   results: PatentResult[];
   source: string;
+  /** Set when serving cached data because USPTO is unreachable. */
+  notice?: string;
 }
 
 export interface TrademarkResult {
@@ -70,6 +72,8 @@ export interface TrademarkSearchResponse {
   totalPages: number;
   results: TrademarkResult[];
   source: string;
+  /** Set when serving cached data because USPTO is unreachable. */
+  notice?: string;
 }
 
 export interface ApiError {

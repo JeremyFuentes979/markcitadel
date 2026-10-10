@@ -18,6 +18,14 @@ export const env = {
   ownerUnionId: process.env.OWNER_UNION_ID ?? "",
   /** Official USPTO Open Data Portal key — when set, patents are served via the official API. */
   usptoOdpApiKey: process.env.USPTO_ODP_API_KEY ?? "",
-  /** Stripe payment link for the Pro plan (https://buy.stripe.com/...). Empty = payments not yet configured. */
-  stripePaymentLink: process.env.STRIPE_PAYMENT_LINK ?? "",
+  /** Public base URL of the site, used for Stripe success/cancel/portal return URLs. */
+  appUrl: (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, ""),
+  /** Stripe secret key (sk_live_... / sk_test_...). Empty = payments disabled. */
+  stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
+  /** Signing secret of the Stripe webhook endpoint (whsec_...). */
+  stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
+  /** Recurring monthly Price id for the Pro plan (price_...). */
+  stripePricePro: process.env.STRIPE_PRICE_PRO ?? "",
+  /** One-time Price id for the $29 Name Clearance Report (price_...). */
+  stripePriceReport: process.env.STRIPE_PRICE_REPORT ?? "",
 };

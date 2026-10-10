@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import { apiKeys, apiUsage, type ApiKey } from "@db/schema";
-import { planFor } from "./plans";
+import { getUserPlan, planFor } from "./plans";
 
 /**
  * API key authentication, rate limiting, and usage metering for the public
@@ -30,7 +30,7 @@ export async function createApiKey(
     .from(apiKeys)
     .where(and(eq(apiKeys.userId, userId), eq(apiKeys.active, true)));
   const activeCount = existing.length;
-  const userPlan = existing.some((k) => k.plan === "pro") ? "pro" : "free";
+  const userPlan = await getUserPlan(userId); // users.plan, set by Stripe webhook
   const def = planFor(userPlan);
   if (activeCount >= def.maxActiveKeys) {
     throw new Error(

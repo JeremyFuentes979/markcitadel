@@ -5,7 +5,6 @@ import {
   Building2,
   CircleCheck,
   CircleX,
-  FileDown,
   Globe,
   Landmark,
   LoaderCircle,
@@ -21,6 +20,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/providers/trpc";
 import { cn } from "@/lib/utils";
+import { ReportCTA } from "@/components/ReportCTA";
+import { AttorneyLeadForm } from "@/components/AttorneyLeadForm";
 
 // ─── Checklist item shells ──────────────────────────────────────────────────
 
@@ -210,6 +211,12 @@ export default function NameCheckPage() {
             Check
           </Button>
         </div>
+
+        {submitted && d?.degraded && (
+          <div className="mt-6 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+            {d.degraded}
+          </div>
+        )}
 
         {submitted && (
           <div className="mt-8 space-y-4">
@@ -448,20 +455,14 @@ export default function NameCheckPage() {
                 how to register it
               </Link>
               .
-              <div className="mt-4 pt-4 border-t border-navy-200 flex flex-wrap items-center gap-3">
-                <a
-                  href={`/api/v1/namecheck/report?name=${encodeURIComponent(submitted)}`}
-                  className="inline-flex items-center gap-2 rounded-lg bg-navy-800 px-4 py-2 text-sm font-medium text-white hover:bg-navy-900 transition-colors"
-                >
-                  <FileDown className="w-4 h-4" />
-                  Download clearance report (PDF)
-                </a>
-                <span className="text-xs text-navy-600">
-                  Everything on this page, formatted to share with a partner,
-                  attorney, or investor.
-                </span>
-              </div>
             </div>
+
+            <ReportCTA name={submitted} />
+            <AttorneyLeadForm businessName={submitted} />
+            <p className="text-xs text-slate-500">
+              MarkCitadel is an information tool, not a law firm. Results are a
+              preliminary screening and are not legal advice.
+            </p>
           </div>
         )}
 

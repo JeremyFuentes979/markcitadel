@@ -1,10 +1,9 @@
-import { useState } from "react";
-import { Link } from "react-router";
-import { Check, Copy, Landmark, Zap } from "lucide-react";
+import { useEffect } from "react";
+import { Link, useSearchParams } from "react-router";
+import { Check, CreditCard, FileText, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/useAuth";
 import { trpc } from "@/providers/trpc";
 
@@ -17,31 +16,48 @@ export default function PricingPage() {
   });
   const utils = trpc.useUtils();
 
-  const [token, setToken] = useState<string | null>(null);
-  const [payLink, setPayLink] = useState<string | null>(null);
-  const [activateCode, setActivateCode] = useState("");
+  const [params] = useSearchParams();
+  const checkoutState = params.get("checkout");
+  const billing = trpc.billing.status.useQuery(undefined, {
+    enabled: isAuthenticated,
+    retry: false,
+  });
+  const reportInfo = trpc.billing.reportInfo.useQuery();
 
-  const startUpgrade = trpc.billing.startUpgrade.useMutation({
+  useEffect(() => {
+    if (checkoutState === "success") {
+      toast.success(
+        "Payment received — Pro activates as soon as Stripe confirms it (usually a few seconds).",
+      );
+      // the webhook may land a moment after redirect; refresh a few times
+      const t = [1500, 4000, 9000].map((ms) =>
+        setTimeout(() => {
+          utils.billing.myPlan.invalidate();
+          utils.billing.status.invalidate();
+          utils.apiKeys.list.invalidate();
+        }, ms),
+      );
+      return () => t.forEach(clearTimeout);
+    }
+    if (checkoutState === "cancelled") toast("Checkout cancelled — no charge was made.");
+  }, [checkoutState, utils]);
+
+  const checkoutPro = trpc.billing.checkoutPro.useMutation({
     onSuccess: (d) => {
-      setToken(d.token);
-      setPayLink(d.paymentLink);
+      window.location.href = d.url;
     },
     onError: (e) => toast.error(e.message),
   });
-  const activate = trpc.billing.activate.useMutation({
-    onSuccess: () => {
-      toast.success("Pro activated — your keys now have Pro limits.");
-      setActivateCode("");
-      setToken(null);
-      utils.billing.myPlan.invalidate();
-      utils.apiKeys.list.invalidate();
+  const portal = trpc.billing.portal.useMutation({
+    onSuccess: (d) => {
+      window.location.href = d.url;
     },
     onError: (e) => toast.error(e.message),
   });
 
   const isPro = myPlan.data?.plan === "pro";
 
-  // Owner-only billing reconciliation panel
+  // Owner-only read-only billing panel (Stripe is the source of truth)
   const isOwner = trpc.billing.isOwner.useQuery(undefined, {
     enabled: isAuthenticated,
     retry: false,
@@ -50,12 +66,9 @@ export default function PricingPage() {
     enabled: !!isOwner.data,
     retry: false,
   });
-  const downgrade = trpc.billing.adminDowngrade.useMutation({
-    onSuccess: () => {
-      toast.success("User downgraded to Free");
-      utils.billing.adminActivity.invalidate();
-    },
-    onError: (e) => toast.error(e.message),
+  const leads = trpc.billing.adminLeads.useQuery(undefined, {
+    enabled: !!isOwner.data,
+    retry: false,
   });
 
   return (
@@ -135,10 +148,14 @@ export default function PricingPage() {
                   ) : (
                     <Button
                       className="w-full bg-navy-700 hover:bg-navy-800"
-                      disabled={startUpgrade.isPending}
-                      onClick={() => startUpgrade.mutate()}
+                      disabled={checkoutPro.isPending || !plans.data?.paymentsConfigured}
+                      onClick={() => checkoutPro.mutate()}
                     >
-                      {startUpgrade.isPending ? "Preparing…" : `Upgrade to ${p.name}`}
+                      {!plans.data?.paymentsConfigured
+                        ? "Coming soon"
+                        : checkoutPro.isPending
+                          ? "Opening secure checkout…"
+                          : `Upgrade to ${p.name}`}
                     </Button>
                   )}
                 </div>
@@ -147,138 +164,100 @@ export default function PricingPage() {
           })}
         </div>
 
-        {/* Upgrade flow: shown after clicking Upgrade */}
-        {token && payLink && (
-          <div className="mt-8 rounded-2xl border border-brass-400 bg-amber-50 p-6">
-            <h3 className="font-semibold text-slate-900">
-              Finish your upgrade — 3 quick steps
-            </h3>
-            <ol className="mt-3 text-sm text-slate-700 space-y-3 list-decimal pl-5">
-              <li>
-                <span className="font-medium">Copy your upgrade code</span> —
-                it proves your payment belongs to your account:
-                <div className="mt-1.5 flex gap-2 max-w-md">
-                  <Input readOnly value={token} className="font-mono text-xs bg-white" />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      navigator.clipboard.writeText(token);
-                      toast.success("Code copied");
-                    }}
-                  >
-                    <Copy className="w-4 h-4" />
-                  </Button>
-                </div>
-              </li>
-              <li>
-                <span className="font-medium">Pay on Stripe.</span>{" "}
-                <a
-                  href={payLink}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-navy-700 underline font-medium"
-                >
-                  Open the secure checkout
-                </a>{" "}
-                and complete payment — nothing extra to fill in there.
-              </li>
-              <li>
-                <span className="font-medium">Come back here</span> and paste
-                your code into the activation box below. Pro turns on
-                instantly.
-              </li>
-            </ol>
+        {/* Manage subscription */}
+        {isAuthenticated && billing.data?.canManage && (
+          <div className="mt-6 rounded-2xl border bg-white p-6 flex flex-wrap items-center gap-4">
+            <div className="flex-1 min-w-52">
+              <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                <CreditCard className="w-4 h-4 text-navy-600" /> Billing
+              </h3>
+              <p className="mt-1 text-sm text-slate-600">
+                Plan: <strong>{billing.data.plan === "pro" ? "Pro" : "Free"}</strong>
+                {billing.data.subscriptionStatus &&
+                  ` · subscription ${billing.data.subscriptionStatus.replace("_", " ")}`}
+                {billing.data.currentPeriodEnd &&
+                  ` · renews/ends ${new Date(billing.data.currentPeriodEnd).toLocaleDateString()}`}
+              </p>
+              {billing.data.subscriptionStatus === "past_due" && (
+                <p className="mt-1 text-sm text-red-600">
+                  Your last payment failed. Update your card to keep Pro.
+                </p>
+              )}
+            </div>
+            <Button
+              variant="outline"
+              disabled={portal.isPending}
+              onClick={() => portal.mutate()}
+            >
+              {portal.isPending ? "Opening…" : "Manage billing & invoices"}
+            </Button>
           </div>
         )}
 
-        {/* Activate after paying */}
-        {isAuthenticated && !isPro && (
-          <div className="mt-6 rounded-2xl border bg-white p-6">
+        {/* One-time report offer */}
+        <div className="mt-10 rounded-2xl border border-brass-400 bg-amber-50 p-6 flex flex-wrap items-center gap-4">
+          <div className="flex-1 min-w-60">
             <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-              <Landmark className="w-4 h-4 text-navy-600" />
-              Already paid? Activate Pro
+              <FileText className="w-4 h-4 text-navy-600" />
+              Naming a business? Name Clearance Report — $
+              {reportInfo.data?.priceUsd ?? 29} one-time
             </h3>
             <p className="mt-1.5 text-sm text-slate-600">
-              Paste the upgrade code you got when you clicked Upgrade.
-              Activation is instant and applies to all your API keys.
+              No subscription. Run the free name check, then unlock the full
+              PDF report: the top live conflicting trademarks with owners and
+              serial numbers, domain status, sound-alike risks, and a
+              checklist to hand to your attorney or partner.
             </p>
-            <div className="mt-3 flex gap-2 max-w-md">
-              <Input
-                placeholder="mku_…"
-                value={activateCode}
-                onChange={(e) => setActivateCode(e.target.value)}
-                className="font-mono text-xs"
-              />
-              <Button
-                className="bg-navy-700 hover:bg-navy-800"
-                disabled={activate.isPending || activateCode.trim().length < 10}
-                onClick={() => activate.mutate({ token: activateCode.trim() })}
-              >
-                {activate.isPending ? "Activating…" : "Activate"}
-              </Button>
-            </div>
           </div>
-        )}
+          <Button asChild className="bg-navy-700 hover:bg-navy-800">
+            <Link to="/namecheck">Check a name free →</Link>
+          </Button>
+        </div>
 
         {isOwner.data && (
           <div className="mt-10 rounded-2xl border border-slate-300 bg-white p-6">
             <h3 className="font-semibold text-slate-900">
-              Billing activity{" "}
+              Billing overview{" "}
               <span className="text-xs font-normal text-slate-500">
-                (only you can see this)
+                (only you can see this — plans are set automatically by
+                verified Stripe webhooks)
               </span>
             </h3>
-            <p className="mt-1 text-xs text-slate-500">
-              Cross-check "activated" rows against Stripe payment emails. If an
-              activation has no matching payment, downgrade the user.
-            </p>
-            <div className="mt-4 divide-y text-sm">
-              {(activity.data?.length ?? 0) === 0 && (
-                <div className="py-4 text-slate-500">
-                  No upgrade activity yet.
+            <div className="mt-4 grid sm:grid-cols-3 gap-4 text-sm">
+              <div>
+                <div className="text-slate-500 text-xs">Pro subscribers</div>
+                <div className="text-2xl font-bold">
+                  {activity.data?.subscribers.length ?? 0}
                 </div>
-              )}
-              {activity.data?.map((a) => (
-                <div
-                  key={a.id}
-                  className="py-3 flex items-center gap-3 flex-wrap"
-                >
-                  <div className="flex-1 min-w-40">
-                    <div className="font-medium text-slate-900 truncate">
-                      {a.userName ?? "Unnamed user"}{" "}
-                      <span className="text-slate-400 font-normal">
-                        {a.userEmail ?? `#${a.userId}`}
-                      </span>
-                    </div>
-                    <div className="text-xs text-slate-500">
-                      code issued {new Date(a.createdAt).toLocaleString()}
-                    </div>
-                  </div>
-                  {a.usedAt ? (
-                    <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">
-                      Activated {new Date(a.usedAt).toLocaleDateString()}
-                    </span>
-                  ) : (
-                    <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-slate-100 text-slate-500">
-                      Awaiting payment
-                    </span>
-                  )}
-                  {a.usedAt && (
-                    <button
-                      onClick={() => {
-                        if (
-                          confirm(
-                            `Downgrade ${a.userName ?? a.userEmail ?? `user #${a.userId}`} to Free?`,
-                          )
-                        )
-                          downgrade.mutate({ userId: a.userId });
-                      }}
-                      className="text-xs text-red-600 hover:underline"
-                    >
-                      Downgrade
-                    </button>
-                  )}
+              </div>
+              <div>
+                <div className="text-slate-500 text-xs">Paid reports</div>
+                <div className="text-2xl font-bold">
+                  {activity.data?.reports.filter((r) => r.status === "paid").length ?? 0}
+                </div>
+              </div>
+              <div>
+                <div className="text-slate-500 text-xs">Attorney leads</div>
+                <div className="text-2xl font-bold">{leads.data?.length ?? 0}</div>
+              </div>
+            </div>
+            <div className="mt-4 divide-y text-sm">
+              {activity.data?.reports.slice(0, 20).map((r) => (
+                <div key={r.id} className="py-2 flex gap-3 flex-wrap">
+                  <span className="flex-1 font-medium">{r.name}</span>
+                  <span className="text-slate-500">{r.email ?? "—"}</span>
+                  <span className="text-xs text-slate-500">{r.status}</span>
+                </div>
+              ))}
+              {leads.data?.slice(0, 20).map((l) => (
+                <div key={`l${l.id}`} className="py-2 flex gap-3 flex-wrap">
+                  <span className="flex-1 font-medium">
+                    Lead: {l.businessName}
+                  </span>
+                  <span className="text-slate-500">
+                    {l.name} · {l.email} {l.phone ? `· ${l.phone}` : ""}
+                  </span>
+                  <span className="text-xs text-slate-500">{l.state ?? ""}</span>
                 </div>
               ))}
             </div>
@@ -290,7 +269,7 @@ export default function PricingPage() {
           <Link to="/terms" className="underline hover:text-slate-700">
             Terms of Service
           </Link>{" "}
-          — cancel anytime from your Stripe receipt email.
+          — cancel anytime from "Manage billing".
         </p>
       </div>
     </Layout>

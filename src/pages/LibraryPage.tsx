@@ -22,6 +22,10 @@ export default function LibraryPage() {
   const saved = trpc.library.listSaved.useQuery(undefined, {
     enabled: isAuthenticated,
   });
+  const myReports = trpc.billing.myReports.useQuery(undefined, {
+    enabled: isAuthenticated,
+    retry: false,
+  });
   const watchList = trpc.library.listWatches.useQuery(undefined, {
     enabled: isAuthenticated,
   });
@@ -80,6 +84,28 @@ export default function LibraryPage() {
             Check watches now
           </button>
         </div>
+
+        {/* Purchased reports */}
+        {(myReports.data?.length ?? 0) > 0 && (
+          <section className="mt-8">
+            <h2 className="text-lg font-semibold text-slate-900">
+              Name Clearance Reports
+            </h2>
+            <div className="mt-3 divide-y rounded-xl border bg-white">
+              {myReports.data!.map((r) => (
+                <div key={r.id} className="p-3 flex items-center gap-3 text-sm">
+                  <span className="flex-1 font-medium">{r.name}</span>
+                  <span className="text-xs text-slate-500">
+                    {r.paidAt ? new Date(r.paidAt).toLocaleDateString() : ""}
+                  </span>
+                  <a href={r.downloadUrl} className="text-navy-700 underline">
+                    Download PDF
+                  </a>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* Watches */}
         <section className="mt-8">

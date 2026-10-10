@@ -29,7 +29,7 @@ export default function TermsPage() {
           </h1>
         </div>
         <p className="text-sm text-slate-500 mb-10">
-          Last updated: August 30, 2026
+          Last updated: October 9, 2026
         </p>
 
         <div className="space-y-8">
@@ -86,12 +86,22 @@ export default function TermsPage() {
 
           <Section title="3. Not legal advice">
             <p>
-              The service provides data for informational purposes only.
-              Nothing here is legal advice, and using the service does not
-              create an attorney–client relationship. A "clear" search result
-              does not guarantee that a name or invention is available. For
-              clearance, filing, or enforcement decisions, consult a licensed
-              intellectual-property attorney.
+              <strong>
+                MarkCitadel is an information service, not a law firm, and
+                nothing on this site, in the API, or in any report is legal
+                advice.
+              </strong>{" "}
+              Search results, name checks, and Name Clearance Reports are
+              automated, preliminary screenings built from public USPTO and
+              domain-registration data, which can be incomplete, delayed, or
+              temporarily unavailable. They do not cover state registrations,
+              common-law (unregistered) use, or foreign rights comprehensively,
+              and they do not assess likelihood of confusion, registrability,
+              or infringement for your goods or services. Using the service or
+              buying a report does not create an attorney-client relationship.
+              Consult a licensed trademark attorney before adopting, filing,
+              or enforcing a mark. MarkCitadel is not affiliated with or
+              endorsed by the USPTO.
             </p>
           </Section>
 
@@ -127,20 +137,23 @@ export default function TermsPage() {
             </p>
           </Section>
 
-          <Section title="5. Paid plans and billing">
+          <Section title="5. Paid plans, reports, and billing">
             <p>
               The Free plan is free forever. Paid plans (such as Pro) are
-              billed monthly through Stripe, our payment processor — we never
-              see or store your card details. By upgrading you agree to:
+              billed monthly, and Name Clearance Reports are a one-time
+              purchase, both through Stripe, our payment processor — we never
+              see or store your card details. A report reflects the data
+              available when it is generated. By paying you agree to:
             </p>
             <ul className="list-disc pl-5 space-y-1">
               <li>
                 Paid plans renew automatically each month until cancelled
               </li>
               <li>
-                You can cancel anytime from your Stripe receipt email or
-                Stripe's customer portal; access continues until the end of
-                the current billing period
+                You can cancel anytime from "Manage billing" on the Pricing
+                page (Stripe customer portal); access continues until the end
+                of the current billing period. If a renewal payment fails, Pro
+                access may be removed once Stripe's retry period ends
               </li>
               <li>
                 Payments are non-refundable except where required by law;
@@ -154,7 +167,18 @@ export default function TermsPage() {
             </ul>
           </Section>
 
-          <Section title="6. Availability and changes">
+          <Section title="6. Attorney referrals">
+            <p>
+              If you request an introduction to a trademark attorney, we share
+              the details you submit with an independent attorney or law firm
+              who may contact you. We may receive a referral or marketing fee
+              from that partner. Attorneys are independent of MarkCitadel; we
+              do not supervise or guarantee their services, and any
+              engagement is solely between you and the attorney.
+            </p>
+          </Section>
+
+          <Section title="7. Availability and changes">
             <p>
               The service depends on USPTO systems that we do not control. We
               aim for high availability but do not guarantee uninterrupted
@@ -164,7 +188,7 @@ export default function TermsPage() {
             </p>
           </Section>
 
-          <Section title="7. Disclaimers and limitation of liability">
+          <Section title="8. Disclaimers and limitation of liability">
             <p>
               The service is provided "as is" and "as available", without
               warranties of any kind, express or implied, including accuracy,
@@ -177,7 +201,7 @@ export default function TermsPage() {
             </p>
           </Section>
 
-          <Section title="8. Contact">
+          <Section title="9. Contact">
             <p>
               Questions about these terms or the API can be sent through the
               feedback channels listed on the Developers page.

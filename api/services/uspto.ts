@@ -22,21 +22,111 @@ import { env } from "../lib/env";
  *             daily bulk case-file downloads.)
  */
 
-// ─── Small TTL cache to be polite to USPTO and fast for repeat queries ──────
+// ─── Resilience: cache, timeouts, retries, degraded mode ────────────────────
 
-const cache = new Map<string, { data: unknown; expires: number }>();
-const CACHE_TTL_MS = 5 * 60 * 1000;
+/**
+ * USPTO data changes at most daily (trademark index refreshes nightly), so a
+ * 6-hour fresh window is safe. Entries are kept up to 48h and served as
+ * "stale" with a notice if USPTO is down (stale-if-error).
+ */
+const cache = new Map<string, { data: unknown; storedAt: number }>();
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const STALE_MAX_MS = 48 * 60 * 60 * 1000;
+const CACHE_MAX_ENTRIES = 5000;
 
 function cached<T>(key: string): T | null {
   const hit = cache.get(key);
-  if (hit && hit.expires > Date.now()) return hit.data as T;
-  if (hit) cache.delete(key);
+  if (hit && Date.now() - hit.storedAt < CACHE_TTL_MS) return hit.data as T;
   return null;
 }
 
+function staleCached<T>(key: string): { data: T; ageMs: number } | null {
+  const hit = cache.get(key);
+  if (!hit) return null;
+  const ageMs = Date.now() - hit.storedAt;
+  if (ageMs > STALE_MAX_MS) {
+    cache.delete(key);
+    return null;
+  }
+  return { data: hit.data as T, ageMs };
+}
+
 function store(key: string, data: unknown) {
-  if (cache.size > 500) cache.clear();
-  cache.set(key, { data, expires: Date.now() + CACHE_TTL_MS });
+  if (cache.size >= CACHE_MAX_ENTRIES) {
+    // evict oldest ~10% (Map preserves insertion order)
+    let n = Math.ceil(CACHE_MAX_ENTRIES / 10);
+    for (const k of cache.keys()) {
+      cache.delete(k);
+      if (--n <= 0) break;
+    }
+  }
+  cache.delete(key);
+  cache.set(key, { data, storedAt: Date.now() });
+}
+
+/** User-facing message when a USPTO system is down. */
+export const DEGRADED_MESSAGE =
+  "USPTO's search systems are slow or unavailable right now. Please try again in a few minutes.";
+
+export class UsptoUnavailableError extends Error {
+  constructor(detail: string) {
+    super(`${DEGRADED_MESSAGE} (${detail})`);
+    this.name = "UsptoUnavailableError";
+  }
+}
+
+const REQUEST_TIMEOUT_MS = 12_000;
+const MAX_ATTEMPTS = 3;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * fetch() with a per-attempt timeout and retries with exponential backoff +
+ * jitter on network errors, timeouts, 429 and 5xx. 4xx (other than 429) is
+ * returned to the caller immediately. Bodies must be re-sendable (strings /
+ * FormData), which all callers here use.
+ */
+async function usptoFetch(
+  url: string,
+  init: RequestInit = {},
+  attempts = MAX_ATTEMPTS,
+): Promise<Response> {
+  let lastErr = "unknown error";
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) {
+      const backoff = 400 * 2 ** (i - 1) + Math.floor(Math.random() * 250);
+      await sleep(backoff);
+    }
+    try {
+      const res = await fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (res.status === 429 || res.status >= 500) {
+        lastErr = `HTTP ${res.status}`;
+        const retryAfter = Number(res.headers.get("retry-after"));
+        if (retryAfter > 0 && retryAfter <= 5 && i < attempts - 1) {
+          await sleep(retryAfter * 1000);
+        }
+        if (i === attempts - 1) return res;
+        continue;
+      }
+      return res;
+    } catch (e) {
+      lastErr =
+        e instanceof Error
+          ? e.name === "TimeoutError" || e.name === "AbortError"
+            ? `timed out after ${REQUEST_TIMEOUT_MS / 1000}s`
+            : e.message
+          : String(e);
+    }
+  }
+  throw new UsptoUnavailableError(lastErr);
+}
+
+function staleNotice(ageMs: number): string {
+  const hrs = Math.max(1, Math.round(ageMs / 3_600_000));
+  return `USPTO is currently unreachable, so these are cached results from about ${hrs} hour${hrs === 1 ? "" : "s"} ago. Re-run later for live data.`;
 }
 
 // ─── Patent search (ppubs.uspto.gov) ────────────────────────────────────────
@@ -59,7 +149,7 @@ async function getPatentSession(force = false): Promise<PatentSession> {
   ) {
     return patentSession;
   }
-  const res = await fetch(`${PPUBS}/users/me/session`, {
+  const res = await usptoFetch(`${PPUBS}/users/me/session`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: "-1",
@@ -163,7 +253,7 @@ async function ppubsFetch(
   body: unknown,
   sess: PatentSession,
 ): Promise<Response> {
-  const res = await fetch(`${PPUBS}/${path}`, {
+  const res = await usptoFetch(`${PPUBS}/${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -420,7 +510,7 @@ async function searchPatentsOdp(
   sort: PatentSort,
 ): Promise<{ total: number; results: PatentResult[] }> {
   const sortSpec = ODP_SORT[sort];
-  const res = await fetch(`${ODP}/patent/applications/search`, {
+  const res = await usptoFetch(`${ODP}/patent/applications/search`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -459,7 +549,7 @@ function preferOdp(query: string): boolean {
   return !!env.usptoOdpApiKey && !looksLikeBrsQuery(query);
 }
 
-export async function searchPatents(opts: {
+async function searchPatentsLive(opts: {
   query: string;
   page?: number;
   perPage?: number;
@@ -649,7 +739,7 @@ function normalizeTrademark(hit: EsHit): TrademarkResult {
   };
 }
 
-export async function searchTrademarks(opts: {
+async function searchTrademarksLive(opts: {
   query: string;
   status?: TrademarkStatus;
   page?: number;
@@ -666,7 +756,7 @@ export async function searchTrademarks(opts: {
   if (hit) return hit;
 
   const esQuery = buildTrademarkQueryString(query, status);
-  const res = await fetch(TMSEARCH, {
+  const res = await usptoFetch(TMSEARCH, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -705,7 +795,7 @@ export async function getTrademarkTotal(
   status: TrademarkStatus = "all",
 ): Promise<number> {
   const esQuery = buildTrademarkQueryString(query.trim(), status);
-  const res = await fetch(TMSEARCH, {
+  const res = await usptoFetch(TMSEARCH, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -721,10 +811,10 @@ export async function getTrademarkTotal(
 }
 
 /** Count of live marks containing the exact name (wordmark prefix match). */
-export async function getLiveTrademarkCount(name: string): Promise<number> {
+async function getLiveTrademarkCountLive(name: string): Promise<number> {
   const esc = escapeQueryString(name.trim());
   if (!esc) return 0;
-  const res = await fetch(TMSEARCH, {
+  const res = await usptoFetch(TMSEARCH, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -851,7 +941,7 @@ export async function searchTrademarksByImage(
   form.append("page", String(page - 1));
   form.append("results_per_page", String(perPage));
 
-  const res = await fetch(TM_IMAGE_SEARCH, { method: "POST", body: form });
+  const res = await usptoFetch(TM_IMAGE_SEARCH, { method: "POST", body: form });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(
@@ -869,7 +959,7 @@ export async function searchTrademarksByImage(
   let fullBySerial = new Map<string, TrademarkResult>();
   if (serials.length > 0) {
     try {
-      const enrichRes = await fetch(TMSEARCH, {
+      const enrichRes = await usptoFetch(TMSEARCH, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -940,4 +1030,58 @@ export async function searchTrademarksByImage(
     deadCount: Math.max(0, total - liveCount),
     results,
   };
+}
+
+// ─── Public entry points with stale-if-error degraded mode ──────────────────
+
+function withStale<A extends { query: string }, R extends { notice?: string }>(
+  keyFn: (a: A) => string,
+  live: (a: A) => Promise<R>,
+): (a: A) => Promise<R> {
+  return async (a: A) => {
+    try {
+      return await live(a);
+    } catch (e) {
+      const stale = staleCached<R>(keyFn(a));
+      if (stale) {
+        console.warn("[uspto] serving stale cache:", e instanceof Error ? e.message : e);
+        return { ...stale.data, notice: staleNotice(stale.ageMs) };
+      }
+      throw e;
+    }
+  };
+}
+
+export const searchPatents = withStale(
+  (o: { query: string; page?: number; perPage?: number; sort?: PatentSort }) =>
+    `pat:${o.query.trim()}|${Math.max(1, o.page ?? 1)}|${Math.min(50, Math.max(1, o.perPage ?? 25))}|${o.sort ?? "newest"}`,
+  searchPatentsLive,
+);
+
+export const searchTrademarks = withStale(
+  (o: { query: string; status?: TrademarkStatus; page?: number; perPage?: number }) =>
+    `tm:${o.query.trim()}|${o.status ?? "all"}|${Math.max(1, o.page ?? 1)}|${Math.min(50, Math.max(1, o.perPage ?? 25))}`,
+  searchTrademarksLive,
+);
+
+/** Count of live marks containing the exact name (cached, stale-if-error). */
+export async function getLiveTrademarkCount(name: string): Promise<number> {
+  const key = `tmlive:${name.trim().toLowerCase()}`;
+  const fresh = cached<number>(key);
+  if (fresh !== null) return fresh;
+  try {
+    const n = await getLiveTrademarkCountLive(name);
+    store(key, n);
+    return n;
+  } catch (e) {
+    const stale = staleCached<number>(key);
+    if (stale) return stale.data;
+    throw e;
+  }
+}
+
+if (!env.usptoOdpApiKey) {
+  console.warn(
+    "[uspto] USPTO_ODP_API_KEY is not set — patent search will use the unofficial Patent Public Search session. Get an official key at data.uspto.gov/apikey.",
+  );
 }

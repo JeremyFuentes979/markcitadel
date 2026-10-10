@@ -161,11 +161,12 @@ connector.get("/trademarks/search", async (c) => {
 });
 
 /**
- * Name Clearance Report — PDF download. Free for site visitors (session
- * cookie / same-site), API key required for external callers.
+ * Name Clearance Report — PDF download for API-key holders (metered against
+ * their plan). Website visitors buy the report via Stripe Checkout and
+ * download it from /api/reports/:sessionId.pdf instead.
  */
 connector.get("/namecheck/report", async (c) => {
-  const denied = await requireKeyUnlessInternal(c);
+  const denied = await requireKey(c);
   if (denied) return denied;
   const name = (c.req.query("name") ?? "").trim();
   if (name.length < 2 || name.length > 60) {

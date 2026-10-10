@@ -10,6 +10,7 @@ import PricingPage from './pages/PricingPage'
 import RegisterHelpPage from './pages/RegisterHelpPage'
 import NameCheckPage from './pages/NameCheckPage'
 import StatsPage from './pages/StatsPage'
+import ReportSuccessPage from './pages/ReportSuccessPage'
 import Login from "./pages/Login"
 import NotFound from "./pages/NotFound"
 
@@ -28,6 +29,7 @@ export default function App() {
         <Route path="/register-help" element={<RegisterHelpPage />} />
         <Route path="/namecheck" element={<NameCheckPage />} />
         <Route path="/stats" element={<StatsPage />} />
+        <Route path="/report/success" element={<ReportSuccessPage />} />
         <Route path="/login" element={<Login />} />
         <Route path="*" element={<NotFound />} />
       </Routes>

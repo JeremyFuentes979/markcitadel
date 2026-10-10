@@ -24,6 +24,13 @@ export const users = mysqlTable("users", {
     .notNull()
     .$onUpdate(() => new Date()),
   lastSignInAt: timestamp("lastSignInAt").defaultNow().notNull(),
+  // ── Billing (set only by the verified Stripe webhook) ──
+  plan: mysqlEnum("plan", ["free", "pro"]).default("free").notNull(),
+  stripeCustomerId: varchar("stripe_customer_id", { length: 64 }).unique(),
+  stripeSubscriptionId: varchar("stripe_subscription_id", { length: 64 }),
+  /** Mirrors Stripe's subscription.status (active, trialing, past_due, canceled, unpaid, ...). */
+  subscriptionStatus: varchar("subscription_status", { length: 32 }),
+  currentPeriodEnd: timestamp("current_period_end"),
 });
 
 export type User = typeof users.$inferSelect;
@@ -139,6 +146,61 @@ export const upgradeTokens = mysqlTable("upgrade_tokens", {
 });
 
 export type UpgradeToken = typeof upgradeTokens.$inferSelect;
+
+/** Processed Stripe webhook events (idempotency: Stripe may redeliver). */
+export const stripeEvents = mysqlTable("stripe_events", {
+  id: varchar("id", { length: 255 }).primaryKey(), // evt_...
+  type: varchar("type", { length: 100 }).notNull(),
+  processedAt: timestamp("processed_at").defaultNow().notNull(),
+});
+
+/**
+ * One-time Name Clearance Report purchases ($29). A row is created when the
+ * Checkout Session is created (status "pending") and flipped to "paid" only
+ * by the signature-verified webhook (or a server-side Stripe lookup).
+ * Buyers may be signed in (userId) or guests (email from Checkout).
+ */
+export const reportPurchases = mysqlTable("report_purchases", {
+  id: serial("id").primaryKey(),
+  userId: bigint("user_id", { mode: "number", unsigned: true }).references(
+    () => users.id,
+  ),
+  name: varchar("name", { length: 100 }).notNull(), // the business name checked
+  email: varchar("email", { length: 320 }),
+  stripeSessionId: varchar("stripe_session_id", { length: 255 })
+    .notNull()
+    .unique(),
+  stripePaymentIntentId: varchar("stripe_payment_intent_id", { length: 255 }),
+  amountCents: int("amount_cents"),
+  status: mysqlEnum("status", ["pending", "paid", "refunded"])
+    .default("pending")
+    .notNull(),
+  paidAt: timestamp("paid_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type ReportPurchase = typeof reportPurchases.$inferSelect;
+
+/** "Talk to a trademark attorney" leads, for future referral partners. */
+export const attorneyLeads = mysqlTable("attorney_leads", {
+  id: serial("id").primaryKey(),
+  userId: bigint("user_id", { mode: "number", unsigned: true }).references(
+    () => users.id,
+  ),
+  name: varchar("name", { length: 255 }).notNull(),
+  email: varchar("email", { length: 320 }).notNull(),
+  phone: varchar("phone", { length: 40 }),
+  businessName: varchar("business_name", { length: 255 }).notNull(),
+  state: varchar("state", { length: 40 }),
+  message: text("message"),
+  consent: boolean("consent").default(false).notNull(),
+  status: mysqlEnum("status", ["new", "referred", "closed"])
+    .default("new")
+    .notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type AttorneyLead = typeof attorneyLeads.$inferSelect;
 
 // ─── Site analytics ─────────────────────────────────────────────────────────
 

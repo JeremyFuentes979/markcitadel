@@ -24,16 +24,20 @@ import {
   revokeKey,
 } from "./services/apikeys";
 import {
-  activatePlan,
-  createUpgradeToken,
-  downgradeUser,
+  createPortalLink,
+  createProCheckout,
+  createReportCheckout,
+  getPaidReport,
   getUserPlan,
-  listUpgradeActivity,
-  paymentLink,
+  listBillingActivity,
+  listMyReports,
   paymentsConfigured,
   planFor,
   PLANS,
+  REPORT_PRICE_USD,
+  reportsConfigured,
 } from "./services/plans";
+import { attorneyLeads, users } from "@db/schema";
 import { env } from "./lib/env";
 import { getSiteStats } from "./services/analytics";
 
@@ -77,6 +81,10 @@ const searchRouter = createRouter({
         liveMarks,
         domains,
         soundAlikes: phoneticVariants(name),
+        degraded:
+          liveMarks < 0
+            ? "USPTO's trademark search isn't responding right now, so the trademark count is missing. Domain and sound-alike checks still ran — try again in a few minutes."
+            : null,
       };
     }),
 });
@@ -273,58 +281,150 @@ const billingRouter = createRouter({
     };
   }),
 
-  /**
-   * Start an upgrade: mints a one-time token the user pastes into Stripe
-   * Checkout's client_reference_id field, then back here after paying.
-   */
-  startUpgrade: authedQuery.mutation(async ({ ctx }) => {
-    const link = paymentLink();
-    if (!link) {
+  /** Pro subscription: create a Stripe Checkout Session server-side. */
+  checkoutPro: authedQuery.mutation(async ({ ctx }) => {
+    if (!paymentsConfigured()) {
       throw new TRPCError({
         code: "PRECONDITION_FAILED",
         message: "Payments are not configured yet.",
       });
     }
-    const token = await createUpgradeToken(ctx.user.id);
-    return { token, paymentLink: link };
+    if ((await getUserPlan(ctx.user.id)) === "pro") {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "You're already on Pro." });
+    }
+    return { url: await createProCheckout(ctx.user) };
   }),
 
-  /** Activate Pro with the token after Stripe payment. */
-  activate: authedQuery
-    .input(z.object({ token: z.string().min(10).max(100) }))
+  /** Stripe Billing Portal (cancel, change card, invoices). */
+  portal: authedQuery.mutation(async ({ ctx }) => {
+    try {
+      return { url: await createPortalLink(ctx.user.id) };
+    } catch (e) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: e instanceof Error ? e.message : "Billing portal unavailable",
+      });
+    }
+  }),
+
+  /** Billing status for the account page. */
+  status: authedQuery.query(async ({ ctx }) => {
+    const [u] = await getDb()
+      .select({
+        plan: users.plan,
+        subscriptionStatus: users.subscriptionStatus,
+        currentPeriodEnd: users.currentPeriodEnd,
+        hasCustomer: users.stripeCustomerId,
+      })
+      .from(users)
+      .where(eq(users.id, ctx.user.id));
+    return {
+      plan: u?.plan ?? "free",
+      subscriptionStatus: u?.subscriptionStatus ?? null,
+      currentPeriodEnd: u?.currentPeriodEnd ?? null,
+      canManage: !!u?.hasCustomer,
+    };
+  }),
+
+  /** One-time $29 Name Clearance Report checkout (guests allowed). */
+  reportInfo: publicQuery.query(() => ({
+    available: reportsConfigured(),
+    priceUsd: REPORT_PRICE_USD,
+  })),
+
+  checkoutReport: publicQuery
+    .input(z.object({ name: z.string().trim().min(2).max(60) }))
     .mutation(async ({ ctx, input }) => {
-      const ok = await activatePlan(ctx.user.id, input.token);
-      if (!ok) {
+      if (!reportsConfigured()) {
         throw new TRPCError({
-          code: "BAD_REQUEST",
-          message:
-            "That upgrade code is invalid or has already been used. Check the code and try again — it must be one generated from your account.",
+          code: "PRECONDITION_FAILED",
+          message: "Report purchases are not available yet.",
         });
       }
-      return { ok: true, plan: "pro" as const };
+      return {
+        url: await createReportCheckout({ name: input.name, user: ctx.user }),
+      };
     }),
+
+  /** Confirm a report purchase from the success page. */
+  reportStatus: publicQuery
+    .input(z.object({ sessionId: z.string().min(10).max(255) }))
+    .query(async ({ input }) => {
+      const r = await getPaidReport(input.sessionId).catch(() => null);
+      return r
+        ? {
+            paid: true as const,
+            name: r.name,
+            email: r.email,
+            downloadUrl: `/api/reports/${input.sessionId}.pdf`,
+          }
+        : { paid: false as const };
+    }),
+
+  myReports: authedQuery.query(async ({ ctx }) =>
+    (await listMyReports(ctx.user.id)).map((r) => ({
+      id: Number(r.id),
+      name: r.name,
+      paidAt: r.paidAt,
+      downloadUrl: `/api/reports/${r.stripeSessionId}.pdf`,
+    })),
+  ),
 
   /** Whether the caller is the site owner (for showing the admin panel). */
   isOwner: authedQuery.query(
     ({ ctx }) => !!env.ownerUnionId && ctx.user.unionId === env.ownerUnionId,
   ),
 
-  /** Owner-only: upgrade activity to reconcile against Stripe payment emails. */
+  /** Owner-only: read-only view of subscribers and report sales. */
   adminActivity: authedQuery.query(({ ctx }) => {
     if (!env.ownerUnionId || ctx.user.unionId !== env.ownerUnionId) {
       throw new TRPCError({ code: "FORBIDDEN" });
     }
-    return listUpgradeActivity();
+    return listBillingActivity();
   }),
 
-  /** Owner-only: downgrade a user (e.g. no matching Stripe payment). */
-  adminDowngrade: authedQuery
-    .input(z.object({ userId: z.number().int().positive() }))
+  /** Owner-only: attorney-referral leads. */
+  adminLeads: authedQuery.query(async ({ ctx }) => {
+    if (!env.ownerUnionId || ctx.user.unionId !== env.ownerUnionId) {
+      throw new TRPCError({ code: "FORBIDDEN" });
+    }
+    const rows = await getDb()
+      .select()
+      .from(attorneyLeads)
+      .orderBy(desc(attorneyLeads.createdAt))
+      .limit(200);
+    return rows.map((r) => ({ ...r, id: Number(r.id) }));
+  }),
+});
+
+const leadsRouter = createRouter({
+  /** "Talk to a trademark attorney" — stored for referral partners. */
+  attorney: publicQuery
+    .input(
+      z.object({
+        name: z.string().trim().min(1).max(255),
+        email: z.string().trim().email().max(320),
+        phone: z.string().trim().max(40).optional(),
+        businessName: z.string().trim().min(1).max(255),
+        state: z.string().trim().max(40).optional(),
+        message: z.string().trim().max(2000).optional(),
+        consent: z.literal(true),
+        website: z.string().max(0).optional(), // honeypot — bots fill it
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
-      if (!env.ownerUnionId || ctx.user.unionId !== env.ownerUnionId) {
-        throw new TRPCError({ code: "FORBIDDEN" });
-      }
-      await downgradeUser(input.userId);
+      await getDb()
+        .insert(attorneyLeads)
+        .values({
+          userId: ctx.user?.id ?? null,
+          name: input.name,
+          email: input.email,
+          phone: input.phone || null,
+          businessName: input.businessName,
+          state: input.state || null,
+          message: input.message || null,
+          consent: input.consent,
+        });
       return { ok: true };
     }),
 });
@@ -336,6 +436,7 @@ export const appRouter = createRouter({
   library: libraryRouter,
   apiKeys: apiKeysRouter,
   billing: billingRouter,
+  leads: leadsRouter,
   analytics: createRouter({
     /** Owner-only: first-party site traffic stats. */
     stats: authedQuery.query(async ({ ctx }) => {
