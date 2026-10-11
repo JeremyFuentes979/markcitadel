@@ -1,0 +1,31 @@
+[build]
+  command = "npm run build:web"
+  publish = "dist/public"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+  # pdfkit reads its font metrics (.afm) from disk at runtime, so ship it unbundled
+  external_node_modules = ["pdfkit"]
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# The API function declares `path = "/api/*"` in its config; this redirect is
+# kept as an explicit fallback for older routing.
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
+
+# SPA fallback (React Router)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
