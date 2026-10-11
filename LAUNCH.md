@@ -126,8 +126,9 @@ one the USPTO website uses, which isn't an official API. Official options:
   API is one Netlify Function, `netlify/functions/api.mts`. That function
   passes the Web Request straight to the existing Hono app (`api/app.ts`),
   so the body stays raw and Stripe signature checks work.
-  - It's routed by `config.path = "/api/*"`, plus a `netlify.toml` rewrite
-    and the SPA fallback.
+  - It's routed by `config.path = "/api/*"`. Netlify matches that function
+    before redirects, so the SPA fallback does not catch `/api/*`. There is
+    no rewrite to `/.netlify/functions/api` — a custom path disables that URL.
 - **Serverless-safe state:**
   - USPTO cache → `api_cache` table (6h fresh, 48h stale-if-error, plus a
     small per-instance memo).

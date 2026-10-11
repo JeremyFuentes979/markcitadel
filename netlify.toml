@@ -11,15 +11,10 @@
 [build.environment]
   NODE_VERSION = "20"
 
-# The API function declares `path = "/api/*"` in its config; this redirect is
-# kept as an explicit fallback for older routing.
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/api/:splat"
-  status = 200
-  force = true
-
-# SPA fallback (React Router)
+# SPA fallback (React Router). Do not rewrite /api/* to
+# /.netlify/functions/api — api.mts sets config.path = "/api/*", which
+# disables that default URL (the rewrite 404s). Netlify matches serverless
+# functions before redirects, so this catch-all does not intercept /api/*.
 [[redirects]]
   from = "/*"
   to = "/index.html"
