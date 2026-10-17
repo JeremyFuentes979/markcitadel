@@ -7,6 +7,7 @@ import {
 } from "../services/uspto";
 import { authenticateApiKey } from "../services/apikeys";
 import { checkTrademarkConflicts, conflictSummaryText } from "../services/conflicts";
+import { requestOrigin } from "../lib/oauth";
 import type {
   PatentSort,
   TrademarkResult,
@@ -14,17 +15,17 @@ import type {
 } from "@contracts/types";
 
 /**
- * Model Context Protocol (MCP) server — stateless Streamable HTTP transport.
+ * Model Context Protocol (MCP) server — stateless Streamable HTTP transport,
+ * served at both /api/mcp and /mcp.
  *
- * This single endpoint is what turns MarkCitadel into a native connector for
- * AI assistants:
- *   - Anthropic Claude: Customize → Connectors → Add custom connector → paste
- *     https://<your-domain>/api/mcp
- *   - OpenAI ChatGPT deep research / Responses API: MCP servers with `search`
- *     and `fetch` tools (both implemented here)
- *   - Any other MCP-capable agent framework
+ * Auth ("lazy"): initialize / tools/list are open so clients can discover the
+ * tools; tools/call needs `Authorization: Bearer pmk_…`. Clients get that key
+ * either by pasting it (Cursor, Claude Code, VS Code, Responses API…) or via
+ * OAuth (ChatGPT, Claude.ai/Desktop connectors): a 401 carries
+ * `WWW-Authenticate: Bearer resource_metadata=…`, which points at
+ * /.well-known/oauth-protected-resource (see routes/oauth.ts).
  *
- * No authentication: the server only exposes public USPTO data.
+ * ChatGPT deep research / company knowledge use the `search` + `fetch` tools.
  */
 
 export const mcp = new Hono();
@@ -33,12 +34,33 @@ mcp.use(
   "/*",
   cors({
     origin: "*",
-    allowMethods: ["GET", "POST"],
-    allowHeaders: ["Content-Type", "Mcp-Session-Id", "Authorization"],
+    allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
+    allowHeaders: [
+      "Content-Type",
+      "Accept",
+      "Authorization",
+      "Mcp-Session-Id",
+      "Mcp-Protocol-Version",
+      "Last-Event-ID",
+    ],
+    exposeHeaders: ["Mcp-Session-Id", "WWW-Authenticate"],
+    maxAge: 86400,
   }),
 );
 
-const PROTOCOL_VERSION = "2025-06-18";
+/** Newest first. We answer with the client's version when we support it. */
+const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
+const DEFAULT_PROTOCOL_VERSION = "2025-06-18";
+
+/** All tools only read public USPTO data. */
+const READ_ONLY = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: true,
+};
+/** OpenAI Apps SDK: tool needs the user's OAuth sign-in (API key). */
+const SECURITY = [{ type: "oauth2", scopes: ["mcp"] }];
 
 const TOOLS = [
   {
@@ -139,6 +161,22 @@ const TOOLS = [
     },
   },
 ];
+
+const TITLES: Record<string, string> = {
+  check_trademark: "Check if a name is taken",
+  search_patents: "Search U.S. patents",
+  search_trademarks: "Search U.S. trademarks",
+  search: "Search patents and trademarks",
+  fetch: "Fetch a patent or trademark record",
+};
+
+const TOOL_LIST = TOOLS.map((t) => ({
+  ...t,
+  title: TITLES[t.name],
+  annotations: { title: TITLES[t.name], ...READ_ONLY },
+  // OpenAI Apps SDK reads per-tool auth requirements from _meta.
+  _meta: { securitySchemes: SECURITY },
+}));
 
 // ─── Tool implementations ───────────────────────────────────────────────────
 
@@ -315,24 +353,30 @@ function rpcError(id: string | number | null, code: number, message: string) {
 async function handleMessage(msg: JsonRpcRequest) {
   const id = msg.id ?? null;
   switch (msg.method) {
-    case "initialize":
+    case "initialize": {
+      const requested = String(msg.params?.protocolVersion ?? "");
+      const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.includes(requested)
+        ? requested
+        : DEFAULT_PROTOCOL_VERSION;
       return {
         jsonrpc: "2.0",
         id,
         result: {
-          protocolVersion: PROTOCOL_VERSION,
+          protocolVersion,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "markcitadel", version: "1.0.0" },
           instructions:
-            "Search live USPTO data. Use search_trademarks to check if a brand or " +
-            "business name is taken, search_patents for prior art and patent lookups. " +
-            "search + fetch provide a unified interface across both.",
+            "Search live USPTO data. Use check_trademark to answer whether a brand or " +
+            "business name is taken (verdict + top conflicts), search_trademarks for raw " +
+            "trademark lists, search_patents for prior art and patent lookups. " +
+            "search + fetch provide a unified interface across both. Not legal advice.",
         },
       };
+    }
     case "ping":
       return { jsonrpc: "2.0", id, result: {} };
     case "tools/list":
-      return { jsonrpc: "2.0", id, result: { tools: TOOLS } };
+      return { jsonrpc: "2.0", id, result: { tools: TOOL_LIST } };
     case "tools/call": {
       const params = msg.params ?? {};
       const toolName = String(params.name ?? "");
@@ -361,17 +405,31 @@ async function handleMessage(msg: JsonRpcRequest) {
   }
 }
 
-mcp.get("/", (c) =>
-  c.json(
+mcp.get("/", (c) => {
+  // Streamable HTTP clients probe GET for a server→client SSE stream. We are
+  // stateless and never push, so the spec answer is 405 (clients then carry
+  // on with POST only). Browsers get a short JSON description instead.
+  if ((c.req.header("accept") ?? "").includes("text/event-stream")) {
+    c.header("Allow", "POST");
+    return c.body(null, 405);
+  }
+  return c.json(
     {
       name: "markcitadel",
       protocol: "mcp",
       transport: "streamable-http (stateless)",
       usage: "POST JSON-RPC 2.0 messages here",
+      docs: `${requestOrigin(c.req.raw)}/developers#mcp`,
     },
     200,
-  ),
-);
+  );
+});
+
+// Stateless: there is no session to terminate.
+mcp.delete("/", (c) => {
+  c.header("Allow", "POST");
+  return c.body(null, 405);
+});
 
 mcp.post("/", async (c) => {
   let body: JsonRpcRequest | JsonRpcRequest[];
@@ -395,6 +453,16 @@ mcp.post("/", async (c) => {
       c.req.header("authorization") ?? null,
     );
     if (!auth.ok) {
+      const origin = requestOrigin(c.req.raw);
+      const resourcePath = c.req.path.startsWith("/api/") ? "/api/mcp" : "/mcp";
+      if (auth.status === 401) {
+        // RFC 9728 §5.1: tell OAuth-capable clients where to sign in.
+        c.header(
+          "WWW-Authenticate",
+          `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource${resourcePath}"` +
+            (auth.error === "MISSING_API_KEY" ? "" : `, error="invalid_token"`),
+        );
+      }
       return c.json(
         {
           jsonrpc: "2.0",
@@ -404,7 +472,10 @@ mcp.post("/", async (c) => {
             content: [
               {
                 type: "text",
-                text: `API key required: ${auth.message}`,
+                text:
+                  `API key required: ${auth.message} ` +
+                  `Connect with OAuth (sign in to MarkCitadel) or add the header ` +
+                  `'Authorization: Bearer pmk_…' — see ${origin}/developers#mcp`,
               },
             ],
           },

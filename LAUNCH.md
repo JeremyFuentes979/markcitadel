@@ -382,3 +382,25 @@ leads per 100 checks.
 - **Front-end bundle** is ~860 KB (code-splitting would help mobile load times).
 - **Competition:** free USPTO search and Trademarkia exist. The moat is
   distribution and the report-plus-attorney bundle.
+
+## AI connectors (MCP)
+
+- Endpoint: `https://markcitadel.com/mcp` (alias of `/api/mcp`), stateless
+  Streamable HTTP. `initialize` / `tools/list` are open; `tools/call` needs a
+  `pmk_` API key.
+- Header clients (Cursor, Claude Code, VS Code, `mcp-remote`, OpenAI
+  Responses API) paste `Authorization: Bearer pmk_…`.
+- OAuth clients (ChatGPT, Claude.ai / Claude Desktop connectors) get a 401 with
+  `WWW-Authenticate: Bearer resource_metadata=…`, discover
+  `/.well-known/oauth-protected-resource` and
+  `/.well-known/oauth-authorization-server`, register via DCR
+  (`/api/oauth/register`), send the user to `/oauth/authorize` (Supabase
+  sign-in + Allow) and exchange the code (PKCE S256) at `/api/oauth/token`
+  for a regular `pmk_` key named "AI connector: <client>". Re-connecting the
+  same client replaces that key. Users revoke it on the Developers page.
+- Stateless: client ids and codes are HMAC-signed. Optional env var
+  `OAUTH_SIGNING_SECRET` (any long random string); without it a key is
+  derived from `DATABASE_URL`. Rotating either invalidates registered
+  clients, so connectors must be re-added.
+- Supabase Auth must allow redirects back to `https://markcitadel.com/login**`
+  (Authentication → URL Configuration) for sign-in from the consent page.

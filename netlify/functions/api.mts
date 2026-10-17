@@ -20,5 +20,16 @@ export default async (req: Request, _context: Context) => {
 };
 
 export const config: Config = {
-  path: "/api/*",
+  path: [
+    "/api/*",
+    // MCP connector: short alias + OAuth discovery documents (otherwise the
+    // SPA fallback would answer these with index.html).
+    "/mcp",
+    "/.well-known/oauth-protected-resource",
+    "/.well-known/oauth-protected-resource/*",
+    "/.well-known/oauth-authorization-server",
+    "/.well-known/oauth-authorization-server/*",
+    "/.well-known/openid-configuration",
+    "/.well-known/openid-configuration/*",
+  ],
 };
