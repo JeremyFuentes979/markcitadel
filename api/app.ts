@@ -5,6 +5,7 @@ import { appRouter } from "./router";
 import { createContext } from "./context";
 import { connector } from "./routes/connector";
 import { mcp } from "./routes/mcp";
+import { oauth, wellKnown } from "./routes/oauth";
 import { stripeWebhook } from "./routes/stripe";
 import { reports } from "./routes/reports";
 import { clientIp, recordPageview } from "./services/analytics";
@@ -19,6 +20,7 @@ export const app = new Hono();
 
 // Image search uploads are the largest bodies; Netlify caps sync payloads at 6 MB.
 app.use("/api/*", bodyLimit({ maxSize: 6 * 1024 * 1024 }));
+app.use("/mcp", bodyLimit({ maxSize: 1024 * 1024 }));
 
 app.use("/api/trpc/*", async (c) =>
   fetchRequestHandler({
@@ -30,6 +32,11 @@ app.use("/api/trpc/*", async (c) =>
 );
 app.route("/api/v1", connector);
 app.route("/api/mcp", mcp);
+// Short alias many MCP clients expect (served by the same function).
+app.route("/mcp", mcp);
+app.route("/api/oauth", oauth);
+// OAuth discovery for MCP clients (RFC 9728 / RFC 8414).
+app.route("/", wellKnown);
 app.route("/api/stripe", stripeWebhook);
 app.route("/api/reports", reports);
 

@@ -209,67 +209,124 @@ curl -X POST -H "Authorization: Bearer pmk_YOUR_KEY" \\
         </section>
 
         {/* AI assistants */}
-        <section className="mt-12">
+        <section id="mcp" className="mt-12 scroll-mt-24">
           <h2 className="text-xl font-semibold text-slate-900">
-            Use it inside Claude &amp; ChatGPT
+            Use it inside Claude, ChatGPT, Cursor &amp; other AI tools
           </h2>
           <p className="mt-3 text-sm text-slate-600 leading-relaxed">
-            This site is also a live MCP (Model Context Protocol) server — the
-            open standard both Anthropic and OpenAI use for connectors. Once
-            connected, the assistant can search USPTO data mid-conversation.
+            MarkCitadel is a remote MCP (Model Context Protocol) server — the
+            open standard Anthropic, OpenAI, Cursor and others use for
+            connectors. Once connected, the assistant can check names and search
+            USPTO data mid-conversation. Apps that support sign-in (ChatGPT,
+            Claude) connect with your MarkCitadel account; apps that take a
+            header (Cursor, Claude Code, VS Code) use an API key from above.
+            Either way, searches count toward your plan’s API limits.
           </p>
+          <CodeBlock
+            className="mt-4"
+            language="MCP server URL (Streamable HTTP)"
+            code={`${origin}/mcp`}
+          />
 
           <div className="grid md:grid-cols-2 gap-5 mt-5">
             <div className="border rounded-2xl p-5 bg-white">
               <div className="font-semibold text-slate-900">
-                Anthropic Claude
+                Claude (claude.ai &amp; Claude Desktop)
               </div>
               <ol className="mt-3 text-sm text-slate-600 space-y-2 list-decimal pl-5">
                 <li>
-                  In Claude, open{" "}
+                  Open{" "}
                   <span className="font-medium">
-                    Customize → Connectors → + → Add custom connector
-                  </span>
+                    Settings → Connectors → Add custom connector
+                  </span>{" "}
+                  (Team/Enterprise: an Owner adds it under Organization settings)
                 </li>
                 <li>
-                  Paste the MCP URL below, and add your API key as an{" "}
-                  <code>Authorization: Bearer pmk_…</code> header
+                  Name it <em>MarkCitadel</em>, paste the URL above, and click
+                  Add. Leave the OAuth fields empty.
                 </li>
                 <li>
-                  Enable the connector in a chat and ask things like{" "}
-                  <em>“Is the name Acme Robotics trademarked?”</em>
+                  Click <span className="font-medium">Connect</span>, sign in to
+                  MarkCitadel and click <span className="font-medium">Allow</span>
+                </li>
+                <li>
+                  In a chat, enable MarkCitadel from the tools menu and ask{" "}
+                  <em>“Is the name Acme Robotics trademarked for software?”</em>
                 </li>
               </ol>
+            </div>
+            <div className="border rounded-2xl p-5 bg-white">
+              <div className="font-semibold text-slate-900">OpenAI ChatGPT</div>
+              <ol className="mt-3 text-sm text-slate-600 space-y-2 list-decimal pl-5">
+                <li>
+                  On ChatGPT web, open{" "}
+                  <span className="font-medium">
+                    Plugins → + → Add custom MCP server
+                  </span>{" "}
+                  (older accounts: Settings → Apps → Advanced → Developer mode,
+                  then Create). Workspace admins may need to allow custom MCP
+                  servers.
+                </li>
+                <li>
+                  Name it <em>MarkCitadel</em>, paste the URL above, set
+                  Authentication to <span className="font-medium">OAuth</span>,
+                  tick the risk notice and click Create
+                </li>
+                <li>Sign in to MarkCitadel and click Allow</li>
+                <li>
+                  In a chat, type <code>@MarkCitadel</code> or pick it from the +
+                  menu. The <code>search</code> and <code>fetch</code> tools also
+                  make it usable from deep research.
+                </li>
+              </ol>
+            </div>
+            <div className="border rounded-2xl p-5 bg-white">
+              <div className="font-semibold text-slate-900">Cursor</div>
+              <p className="mt-3 text-sm text-slate-600">
+                Create an API key above, then add this to{" "}
+                <code>~/.cursor/mcp.json</code> (or <code>.cursor/mcp.json</code>{" "}
+                in a project) and enable it under Settings → MCP:
+              </p>
               <CodeBlock
-                className="mt-4"
-                language="MCP server URL"
-                code={`${origin}/api/mcp`}
+                className="mt-3"
+                language="mcp.json"
+                code={`{
+  "mcpServers": {
+    "markcitadel": {
+      "url": "${origin}/mcp",
+      "headers": { "Authorization": "Bearer pmk_YOUR_KEY" }
+    }
+  }
+}`}
               />
             </div>
             <div className="border rounded-2xl p-5 bg-white">
               <div className="font-semibold text-slate-900">
-                OpenAI ChatGPT
+                Claude Code, VS Code &amp; others
               </div>
-              <ol className="mt-3 text-sm text-slate-600 space-y-2 list-decimal pl-5">
-                <li>
-                  <span className="font-medium">Deep research / connectors:</span>{" "}
-                  add the same MCP URL — the required <code>search</code> and{" "}
-                  <code>fetch</code> tools are built in
-                </li>
-                <li>
-                  <span className="font-medium">Custom GPTs:</span> create a GPT
-                  Action from the OpenAPI spec below
-                </li>
-                <li>
-                  <span className="font-medium">Responses / Agents API:</span>{" "}
-                  pass the MCP URL as a remote MCP server tool
-                </li>
-              </ol>
               <CodeBlock
-                className="mt-4"
-                language="OpenAPI spec"
-                code={`${origin}/api/v1/openapi.json`}
+                className="mt-3"
+                language="Claude Code"
+                code={`claude mcp add --transport http markcitadel ${origin}/mcp \\
+  --header "Authorization: Bearer pmk_YOUR_KEY"`}
               />
+              <p className="mt-3 text-sm text-slate-600">
+                Any client that only runs local (stdio) servers can use{" "}
+                <code>mcp-remote</code>:
+              </p>
+              <CodeBlock
+                className="mt-3"
+                language="stdio bridge"
+                code={`npx -y mcp-remote ${origin}/mcp \\
+  --header "Authorization: Bearer pmk_YOUR_KEY"`}
+              />
+              <p className="mt-3 text-sm text-slate-600">
+                OpenAI Responses / Agents API: add a tool of type{" "}
+                <code>mcp</code> with <code>server_url</code> set to the URL above
+                and <code>headers: {"{"} Authorization: "Bearer pmk_…" {"}"}</code>.
+                Custom GPT Actions can import{" "}
+                <code>{`${origin}/api/v1/openapi.json`}</code>.
+              </p>
             </div>
           </div>
 
@@ -277,15 +334,17 @@ curl -X POST -H "Authorization: Bearer pmk_YOUR_KEY" \\
             className="mt-5"
             language="Raw MCP protocol (what the AI sends)"
             code={`# List available tools (no key needed for discovery)
-curl -X POST "${origin}/api/mcp" \\
+curl -X POST "${origin}/mcp" \\
   -H "Content-Type: application/json" \\
+  -H "Accept: application/json, text/event-stream" \\
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 
-# Call the trademark search tool (API key required)
-curl -X POST "${origin}/api/mcp" \\
+# Check a name (API key or OAuth token required)
+curl -X POST "${origin}/mcp" \\
   -H "Content-Type: application/json" \\
+  -H "Accept: application/json, text/event-stream" \\
   -H "Authorization: Bearer pmk_YOUR_KEY" \\
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_trademarks","arguments":{"query":"acme","status":"live"}}}'`}
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"check_trademark","arguments":{"name":"acme","classes":[9,42]}}}'`}
           />
         </section>
 

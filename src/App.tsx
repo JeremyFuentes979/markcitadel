@@ -13,6 +13,7 @@ import NameCheckPage from './pages/NameCheckPage'
 import StatsPage from './pages/StatsPage'
 import ReportSuccessPage from './pages/ReportSuccessPage'
 import Login from "./pages/Login"
+import OAuthAuthorizePage from "./pages/OAuthAuthorizePage"
 import NotFound from "./pages/NotFound"
 
 function usePageviewBeacon() {
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="/stats" element={<StatsPage />} />
         <Route path="/report/success" element={<ReportSuccessPage />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/oauth/authorize" element={<OAuthAuthorizePage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </>
