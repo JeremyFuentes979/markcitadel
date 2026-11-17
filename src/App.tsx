@@ -15,6 +15,7 @@ import ReportSuccessPage from './pages/ReportSuccessPage'
 import Login from "./pages/Login"
 import OAuthAuthorizePage from "./pages/OAuthAuthorizePage"
 import NotFound from "./pages/NotFound"
+import IsTrademarkedPage from "./pages/IsTrademarkedPage"
 
 function usePageviewBeacon() {
   const { pathname } = useLocation()
@@ -40,6 +41,7 @@ export default function App() {
         <Route path="/pricing" element={<PricingPage />} />
         <Route path="/register-help" element={<RegisterHelpPage />} />
         <Route path="/namecheck" element={<NameCheckPage />} />
+        <Route path="/is/:slug" element={<IsTrademarkedPage />} />
         <Route path="/stats" element={<StatsPage />} />
         <Route path="/report/success" element={<ReportSuccessPage />} />
         <Route path="/login" element={<Login />} />

@@ -2,9 +2,32 @@ import { FileDown, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/providers/trpc";
+import { recordReportCheckout } from "@/lib/funnel";
+import type { Verdict } from "@contracts/conflicts";
+
+function offerLine(name: string, verdict?: Verdict): string {
+  if (verdict === "high") {
+    return `“${name}” looks risky on this screen. The report lists the live marks, owners, and serial numbers to take to an attorney.`;
+  }
+  if (verdict === "possible") {
+    return `Something overlaps with “${name}”. The report is the one-page write-up of what matched and why.`;
+  }
+  if (verdict === "clear") {
+    return `Nothing loud turned up for “${name}”. The report is the PDF to keep with your filing paperwork.`;
+  }
+  return `The written record for “${name}”: scored conflicts, owners, and a PDF you can forward.`;
+}
 
 /** Paid upsell: unlock the full Name Clearance Report for a checked name. */
-export function ReportCTA({ name, classes }: { name: string; classes?: number[] }) {
+export function ReportCTA({
+  name,
+  classes,
+  verdict,
+}: {
+  name: string;
+  classes?: number[];
+  verdict?: Verdict;
+}) {
   const info = trpc.billing.reportInfo.useQuery();
   const checkout = trpc.billing.checkoutReport.useMutation({
     onSuccess: (d) => {
@@ -19,8 +42,9 @@ export function ReportCTA({ name, classes }: { name: string; classes?: number[] 
     <div className="rounded-2xl border-2 border-navy-700 bg-white p-5">
       <div className="flex items-center gap-2 font-semibold text-slate-900">
         <Lock className="w-4 h-4 text-brass-500" />
-        Get the full Name Clearance Report for "{name}" — ${price}
+        Name Clearance Report for "{name}" — ${price}
       </div>
+      <p className="mt-2 text-sm text-slate-700">{offerLine(name, verdict)}</p>
       <ul className="mt-2 text-sm text-slate-600 list-disc pl-5 space-y-1">
         <li>Risk verdict for your classes, plus up to 10 scored conflicting marks with owners, classes and serial numbers</li>
         <li>Who already owns the word, and why each mark was flagged</li>
@@ -31,7 +55,10 @@ export function ReportCTA({ name, classes }: { name: string; classes?: number[] 
         <Button
           className="bg-navy-800 hover:bg-navy-900"
           disabled={!available || checkout.isPending}
-          onClick={() => checkout.mutate({ name, classes })}
+          onClick={() => {
+            recordReportCheckout();
+            checkout.mutate({ name, classes });
+          }}
         >
           <FileDown className="w-4 h-4" />
           {!available

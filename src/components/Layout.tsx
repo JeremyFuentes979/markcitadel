@@ -29,22 +29,22 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <div className="leading-tight">
               <div className="font-bold text-slate-900">MarkCitadel</div>
               <div className="text-[11px] text-slate-500 -mt-0.5 tracking-wide uppercase">
-                IP Search Connector
+                Name clearance
               </div>
             </div>
           </Link>
           <nav className="flex items-center gap-1 text-sm">
             <Link
-              to="/"
+              to="/namecheck"
+              className="px-3 py-2 rounded-md bg-navy-800 text-white font-medium hover:bg-navy-900 transition-colors"
+            >
+              Check a name
+            </Link>
+            <Link
+              to="/search"
               className="hidden sm:block px-3 py-2 rounded-md text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
             >
               Search
-            </Link>
-            <Link
-              to="/developers"
-              className="hidden sm:block px-3 py-2 rounded-md text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
-            >
-              Developers
             </Link>
             <Link
               to="/pricing"
@@ -53,25 +53,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
               Pricing
             </Link>
             <Link
-              to="/register-help"
+              to="/developers"
               className="hidden md:block px-3 py-2 rounded-md text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+            >
+              Developers
+            </Link>
+            <Link
+              to="/register-help"
+              className="hidden lg:block px-3 py-2 rounded-md text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
             >
               How to register
             </Link>
-            <Link
-              to="/namecheck"
-              className="hidden md:block px-3 py-2 rounded-md text-navy-700 font-medium hover:bg-navy-50 transition-colors"
-            >
-              Name check
-            </Link>
-            <a
-              href="/api/v1/openapi.json"
-              target="_blank"
-              rel="noreferrer"
-              className="ml-1 px-3 py-2 rounded-md bg-slate-900 text-white hover:bg-slate-800 transition-colors"
-            >
-              OpenAPI
-            </a>
             {!isLoading &&
               (isAuthenticated ? (
                 <DropdownMenu>
@@ -184,9 +176,26 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 tsdr.uspto.gov
               </a>
             </span>
+            <Link to="/namecheck" className="underline hover:text-slate-600">
+              Name check
+            </Link>
+            <Link to="/pricing" className="underline hover:text-slate-600">
+              Pricing
+            </Link>
             <Link to="/register-help" className="underline hover:text-slate-600">
               How to register
             </Link>
+            <Link to="/developers" className="underline hover:text-slate-600">
+              API
+            </Link>
+            <a
+              className="underline hover:text-slate-600"
+              href="/api/v1/openapi.json"
+              target="_blank"
+              rel="noreferrer"
+            >
+              OpenAPI
+            </a>
             <Link to="/terms" className="underline hover:text-slate-600">
               Terms of Service
             </Link>

@@ -1,198 +1,186 @@
-import { useNavigate } from "react-router";
-import { Link } from "react-router";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router";
 import {
-  Tag,
-  FileText,
-  Plug,
-  Bot,
-  Building2,
-  Globe,
   ArrowRight,
   BadgeCheck,
+  FileText,
+  Scale,
+  Search,
 } from "lucide-react";
 import { Layout } from "@/components/Layout";
-import { SearchBar } from "@/components/SearchBar";
-import { CodeBlock } from "@/components/CodeBlock";
-import type { SearchType } from "@contracts/types";
+import { Seo } from "@/components/Seo";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  CLEARANCE_EXAMPLES,
+  nameToSlug,
+} from "@/data/clearance";
+
+const REPORT_PRICE = 29;
 
 export default function Home() {
   const navigate = useNavigate();
-  const go = (q: string, type: SearchType) =>
-    navigate(`/search?q=${encodeURIComponent(q)}&type=${type}`);
+  const [name, setName] = useState("");
+
+  const check = (raw: string) => {
+    const n = raw.trim();
+    if (n.length < 2) return;
+    navigate(`/namecheck?name=${encodeURIComponent(n)}`);
+  };
 
   return (
     <Layout>
-      {/* Hero */}
+      <Seo
+        title="Check a business name before you commit"
+        description="Free USPTO name check for live trademarks, the .com, and sound-alike brands. $29 for the PDF you hand a partner or attorney. Not legal advice."
+        path="/"
+      />
+
       <section className="bg-gradient-to-b from-navy-50/80 via-white to-white">
-        <div className="max-w-3xl mx-auto px-4 pt-20 pb-16 text-center">
+        <div className="max-w-3xl mx-auto px-4 pt-16 pb-12 text-center">
           <div className="inline-flex items-center gap-2 text-xs font-medium text-navy-700 bg-navy-100 rounded-full px-3 py-1 mb-6">
-            <Globe className="w-3.5 h-3.5" />
-            Live data from the USPTO
+            <BadgeCheck className="w-3.5 h-3.5" />
+            Free to check · ${REPORT_PRICE} written report
           </div>
           <h1 className="text-4xl sm:text-5xl font-bold text-slate-900 tracking-tight leading-tight">
-            Search U.S. patents &amp; trademarks.
-            <br />
-            <span className="text-brass-500">Built for humans and AI.</span>
+            Check your business name before you print the truck wrap.
           </h1>
           <p className="mt-5 text-lg text-slate-600 max-w-xl mx-auto">
-            One simple search over millions of federal trademark registrations
-            and patent documents — plus an open API your website, startup tool,
-            or AI agent can plug into.
+            Live federal trademarks, the exact-match .com, and brands that
+            sound like yours. Free to screen. ${REPORT_PRICE} for the PDF you
+            hand your partner or a trademark attorney.
           </p>
-          <div className="mt-8">
-            <SearchBar large onSearch={go} initialType="trademarks" />
-          </div>
-          <div className="mt-4 flex flex-wrap justify-center gap-2 text-sm">
-            <span className="text-slate-400">Try:</span>
-            {[
-              { q: "nike", t: "trademarks" as SearchType, label: "nike (mark)" },
-              {
-                q: "tesla",
-                t: "trademarks" as SearchType,
-                label: "tesla (mark)",
-              },
-              {
-                q: "drone delivery",
-                t: "patents" as SearchType,
-                label: "drone delivery (patent)",
-              },
-              {
-                q: "quantum.ti.",
-                t: "patents" as SearchType,
-                label: "quantum.ti. (title)",
-              },
-            ].map((ex) => (
-              <button
-                key={ex.label}
-                onClick={() => go(ex.q, ex.t)}
-                className="text-navy-600 hover:text-navy-800 hover:underline"
-              >
-                {ex.label}
-              </button>
-            ))}
-          </div>
+          <form
+            className="mt-8 flex flex-col sm:flex-row gap-2 max-w-xl mx-auto"
+            onSubmit={(e) => {
+              e.preventDefault();
+              check(name);
+            }}
+          >
+            <label htmlFor="business-name" className="sr-only">
+              Business or brand name
+            </label>
+            <Input
+              id="business-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Business or brand name"
+              className="h-12 text-base min-w-0 flex-1"
+              autoFocus
+            />
+            <Button
+              type="submit"
+              className="h-12 px-5 bg-navy-800 hover:bg-navy-900"
+              disabled={name.trim().length < 2}
+            >
+              Check this name
+            </Button>
+          </form>
+          <p className="mt-3 text-xs text-slate-500">
+            Not legal advice. A preliminary screen of public USPTO records.
+          </p>
         </div>
       </section>
 
-      {/* Features */}
-      <section className="max-w-6xl mx-auto px-4 py-14">
+      <section className="max-w-6xl mx-auto px-4 pb-6">
         <div className="grid md:grid-cols-3 gap-5">
-          <Link to="/namecheck" className="bg-white border border-navy-200 rounded-2xl p-6 hover:border-navy-400 hover:shadow-md transition-all block">
+          <div className="rounded-2xl border bg-white p-6">
             <div className="w-10 h-10 rounded-lg bg-navy-800 text-brass-300 flex items-center justify-center mb-4">
-              <BadgeCheck className="w-5 h-5" />
+              <Search className="w-5 h-5" />
             </div>
-            <h3 className="font-semibold text-slate-900 text-lg">
-              Name check
-            </h3>
-            <p className="text-sm text-slate-600 mt-2 leading-relaxed">
-              The full clearance run before you commit to a name — live USPTO
-              trademarks, exact-match domains, sound-alike brands, plus guided
-              checks for state registries, social handles, and international
-              conflicts.
-            </p>
-            <span className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-navy-700">
-              Check a name <ArrowRight className="w-4 h-4" />
-            </span>
-          </Link>
-          <div className="bg-white border rounded-2xl p-6">
-            <div className="w-10 h-10 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center mb-4">
-              <Tag className="w-5 h-5" />
-            </div>
-            <h3 className="font-semibold text-slate-900 text-lg">
-              Trademark availability
-            </h3>
-            <p className="text-sm text-slate-600 mt-2 leading-relaxed">
-              Check a business or brand name against every live and dead federal
-              trademark — by text, or upload a logo to find visually similar
-              marks with USPTO's image search. See the owner, status, classes,
-              and goods &amp; services before you file an LLC or launch a
-              product.
+            <h2 className="font-semibold text-slate-900">1. Check it free</h2>
+            <p className="mt-2 text-sm text-slate-600 leading-relaxed">
+              See the risk verdict, who already owns the word, live mark
+              counts, domain status, and sound-alike spellings.
             </p>
           </div>
-          <div className="bg-white border rounded-2xl p-6">
-            <div className="w-10 h-10 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center mb-4">
+          <div className="rounded-2xl border-2 border-navy-700 bg-white p-6">
+            <div className="w-10 h-10 rounded-lg bg-brass-400 text-navy-900 flex items-center justify-center mb-4">
               <FileText className="w-5 h-5" />
             </div>
-            <h3 className="font-semibold text-slate-900 text-lg">
-              Patent prior-art search
-            </h3>
-            <p className="text-sm text-slate-600 mt-2 leading-relaxed">
-              Search the full USPTO collection of granted patents and published
-              applications with the same query language patent examiners use —
-              titles, abstracts, applicants, inventors, and more.
+            <h2 className="font-semibold text-slate-900">
+              2. Unlock the ${REPORT_PRICE} report
+            </h2>
+            <p className="mt-2 text-sm text-slate-600 leading-relaxed">
+              Up to 10 scored conflicts with owners and serial numbers, plus
+              a one-page PDF. One-time Stripe payment. No subscription.
             </p>
           </div>
-          <div className="bg-white border rounded-2xl p-6">
-            <div className="w-10 h-10 rounded-lg bg-navy-100 text-navy-700 flex items-center justify-center mb-4">
-              <Plug className="w-5 h-5" />
+          <div className="rounded-2xl border bg-white p-6">
+            <div className="w-10 h-10 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center mb-4">
+              <Scale className="w-5 h-5" />
             </div>
-            <h3 className="font-semibold text-slate-900 text-lg">
-              A connector, not just a website
-            </h3>
-            <p className="text-sm text-slate-600 mt-2 leading-relaxed">
-              Every search is also a clean JSON API with an OpenAPI spec — so
-              AI agents, domain-registrars, and LLC-formation flows can call it
-              directly.
+            <h2 className="font-semibold text-slate-900">
+              3. Ask an attorney if it is close
+            </h2>
+            <p className="mt-2 text-sm text-slate-600 leading-relaxed">
+              Request an introduction to an independent trademark attorney.
+              MarkCitadel may receive a referral fee. They decide whether you
+              should file.
             </p>
           </div>
         </div>
       </section>
 
-      {/* Connector section */}
-      <section className="max-w-6xl mx-auto px-4 pb-16">
-        <div className="bg-slate-950 rounded-3xl p-8 md:p-12 text-white">
-          <div className="grid md:grid-cols-2 gap-10 items-center">
-            <div>
-              <h2 className="text-2xl md:text-3xl font-bold">
-                Plug it into anything
-              </h2>
-              <p className="mt-4 text-slate-300 leading-relaxed">
-                Two GET endpoints return normalized JSON for both patents and
-                trademarks. No API key, CORS open — call it from your backend,
-                your no-code tool, or hand the OpenAPI spec to an AI agent.
-              </p>
-              <ul className="mt-6 space-y-3 text-sm text-slate-300">
-                <li className="flex gap-3">
-                  <Building2 className="w-5 h-5 text-navy-400 shrink-0" />
-                  <span>
-                    LLC &amp; startup formation sites can name-check every
-                    registration against live USPTO trademark data.
-                  </span>
-                </li>
-                <li className="flex gap-3">
-                  <Globe className="w-5 h-5 text-navy-400 shrink-0" />
-                  <span>
-                    Domain and branding tools can warn about conflicts before a
-                    customer buys a name.
-                  </span>
-                </li>
-                <li className="flex gap-3">
-                  <Bot className="w-5 h-5 text-navy-400 shrink-0" />
-                  <span>
-                    AI agents can fetch <code>/api/v1/openapi.json</code> and
-                    start searching immediately.
-                  </span>
-                </li>
-              </ul>
-              <Link
-                to="/developers"
-                className="mt-7 inline-flex items-center gap-2 text-sm font-medium bg-white text-slate-900 rounded-lg px-4 py-2.5 hover:bg-slate-200 transition-colors"
-              >
-                Read the API docs <ArrowRight className="w-4 h-4" />
-              </Link>
-            </div>
-            <CodeBlock
-              language="curl"
-              code={`# Is this brand name taken?
-curl "${
-                typeof window !== "undefined" ? window.location.origin : ""
-              }/api/v1/trademarks/search?q=acme&status=live"
+      <section className="max-w-6xl mx-auto px-4 py-12">
+        <div className="flex items-end justify-between gap-4 mb-5">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900">
+              Is this name trademarked?
+            </h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Open a name, run the live screen, and buy the report only if you
+              still want it.
+            </p>
+          </div>
+          <Link
+            to="/namecheck"
+            className="hidden sm:inline-flex items-center gap-1 text-sm font-medium text-navy-700 hover:underline"
+          >
+            Check any name <ArrowRight className="w-4 h-4" />
+          </Link>
+        </div>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {CLEARANCE_EXAMPLES.slice(0, 9).map((ex) => (
+            <Link
+              key={ex.name}
+              to={`/is/${nameToSlug(ex.name)}`}
+              className="rounded-xl border bg-white px-4 py-3 hover:border-navy-400 hover:shadow-sm transition-all"
+            >
+              <div className="font-medium text-slate-900">{ex.name}</div>
+              <div className="text-xs text-slate-500 mt-0.5 capitalize">
+                {ex.kind} · see the screen
+              </div>
+            </Link>
+          ))}
+        </div>
+      </section>
 
-# Search patents
-curl "${
-                typeof window !== "undefined" ? window.location.origin : ""
-              }/api/v1/patents/search?q=drone%20delivery"`}
-            />
+      <section className="max-w-6xl mx-auto px-4 pb-16">
+        <div className="rounded-3xl bg-slate-950 text-white p-8 md:p-10 flex flex-wrap items-center gap-6">
+          <div className="flex-1 min-w-64">
+            <h2 className="text-2xl font-bold">
+              Building a site, an LLC tool, or an AI agent?
+            </h2>
+            <p className="mt-2 text-slate-300 text-sm leading-relaxed">
+              The same name check is a JSON API and an MCP connector. The
+              website stays free. API plans are for software that calls it
+              all day.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Link
+              to="/developers"
+              className="inline-flex items-center gap-2 text-sm font-medium bg-white text-slate-900 rounded-lg px-4 py-2.5 hover:bg-slate-200"
+            >
+              API docs <ArrowRight className="w-4 h-4" />
+            </Link>
+            <Link
+              to="/pricing"
+              className="inline-flex items-center gap-2 text-sm font-medium rounded-lg px-4 py-2.5 border border-slate-600 hover:bg-slate-900"
+            >
+              API pricing
+            </Link>
           </div>
         </div>
       </section>
