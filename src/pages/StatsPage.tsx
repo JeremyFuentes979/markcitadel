@@ -4,10 +4,12 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   Eye,
+  FileText,
   Globe,
   LayoutDashboard,
   Link2,
   Minus,
+  Search,
   Users,
 } from "lucide-react";
 import { Layout } from "@/components/Layout";
@@ -91,6 +93,44 @@ export default function StatsPage() {
         ) : stats.data ? (
           <div className="space-y-8">
             {/* Headline numbers */}
+            {stats.data.funnel && (
+              <div className="rounded-xl border-2 border-navy-700 bg-white p-6">
+                <h2 className="font-semibold text-slate-900 mb-1">
+                  Name-check to paid report
+                </h2>
+                <p className="text-sm text-slate-500 mb-4">
+                  The number to watch. Aim for 2–5% of name screens starting
+                  checkout.
+                </p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <StatCard
+                    icon={<Search className="w-4 h-4" />}
+                    label="Name check views"
+                    value={stats.data.funnel.nameCheckViews}
+                  />
+                  <StatCard
+                    icon={<Globe className="w-4 h-4" />}
+                    label="SEO name pages"
+                    value={stats.data.funnel.seoPageViews}
+                  />
+                  <StatCard
+                    icon={<FileText className="w-4 h-4" />}
+                    label="Report checkout starts"
+                    value={stats.data.funnel.reportCheckoutStarts}
+                  />
+                  <StatCard
+                    icon={<Activity className="w-4 h-4" />}
+                    label="Checkout rate"
+                    value={
+                      stats.data.funnel.checkoutRatePct == null
+                        ? "—"
+                        : `${stats.data.funnel.checkoutRatePct}%`
+                    }
+                  />
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <StatCard
                 icon={<Eye className="w-4 h-4" />}

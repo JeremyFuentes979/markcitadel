@@ -1,7 +1,8 @@
 import { createHash } from "crypto";
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, like, sql } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import { pageviews } from "@db/schema";
+import { reportCheckoutRate } from "./revenue";
 
 /**
  * First-party site analytics.
@@ -75,6 +76,13 @@ export async function recordPageview(input: {
 export interface SiteStats {
   days: number;
   totals: { views: number; uniqueVisitors: number; botViews: number };
+  funnel: {
+    nameCheckViews: number;
+    seoPageViews: number;
+    reportCheckoutStarts: number;
+    /** Checkout starts ÷ name-check and SEO page views, one decimal. Null if no checks yet. */
+    checkoutRatePct: number | null;
+  };
   byDay: { day: string; views: number; visitors: number }[];
   topPages: { path: string; views: number; visitors: number }[];
   referrers: { host: string; views: number }[];
@@ -140,12 +148,34 @@ export async function getSiteStats(days = 30): Promise<SiteStats> {
     .map((r) => ({ host: r.host ?? "(direct)", views: Number(r.views) }))
     .filter((r) => r.host !== "");
 
+  const countPath = async (where: ReturnType<typeof and>) => {
+    const [row] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(pageviews)
+      .where(where);
+    return Number(row?.n ?? 0);
+  };
+  const [nameCheckViews, seoPageViews, reportCheckoutStarts] = await Promise.all([
+    countPath(and(human, eq(pageviews.path, "/namecheck"))),
+    countPath(and(human, like(pageviews.path, "/is/%"))),
+    countPath(and(human, eq(pageviews.path, "/event/report-checkout"))),
+  ]);
+
   return {
     days,
     totals: {
       views: Number(totalsRow.views),
       uniqueVisitors: Number(totalsRow.uniqueVisitors),
       botViews: Number(botsRow.views),
+    },
+    funnel: {
+      nameCheckViews,
+      seoPageViews,
+      reportCheckoutStarts,
+      checkoutRatePct: reportCheckoutRate(
+        nameCheckViews + seoPageViews,
+        reportCheckoutStarts,
+      ),
     },
     byDay: byDay.map((r) => ({
       day: r.day,

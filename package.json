@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && esbuild api/boot.ts --platform=node --bundle --format=esm --outdir=dist --packages=external",
+    "build": "npm run build:web && esbuild api/boot.ts --platform=node --bundle --format=esm --outdir=dist --packages=external",
     "lint": "eslint .",
     "preview": "vite preview",
     "start": "NODE_ENV=production node dist/boot.js",
@@ -15,7 +15,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "build:web": "vite build"
+    "build:web": "vite build && node scripts/prerender-seo.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.965.0",

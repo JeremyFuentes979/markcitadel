@@ -76,17 +76,38 @@ export default function PricingPage() {
       <div className="max-w-4xl mx-auto px-4 py-14">
         <div className="text-center mb-10">
           <div className="inline-flex items-center gap-2 text-xs font-medium text-navy-700 bg-navy-100 rounded-full px-3 py-1 mb-4">
-            <Zap className="w-3.5 h-3.5" /> API plans
+            <FileText className="w-3.5 h-3.5" /> Name clearance
           </div>
           <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight">
-            Simple pricing for the connector API
+            Check a name free. Pay when you want it in writing.
           </h1>
           <p className="mt-3 text-slate-600 max-w-xl mx-auto">
-            The website is free for everyone. Plans apply to the developer API
-            — the endpoints AI agents, domain tools, and startup sites call.
+            The website screen is free. The ${reportInfo.data?.priceUsd ?? 29}{" "}
+            report is a one-time PDF. API plans are only for software that
+            calls MarkCitadel all day.
           </p>
         </div>
 
+        <div className="mb-10 rounded-2xl border-2 border-navy-700 bg-white p-6 flex flex-wrap items-center gap-4">
+          <div className="flex-1 min-w-60">
+            <h2 className="font-semibold text-slate-900 text-lg">
+              Name Clearance Report — ${reportInfo.data?.priceUsd ?? 29} once
+            </h2>
+            <p className="mt-1.5 text-sm text-slate-600">
+              Run the free check, then unlock the PDF: risk verdict, up to 10
+              scored live marks with owners and serial numbers, domain status,
+              sound-alike risks, and a checklist for your partner or attorney.
+              No subscription.
+            </p>
+          </div>
+          <Button asChild className="bg-navy-800 hover:bg-navy-900">
+            <Link to="/namecheck">Check a name free</Link>
+          </Button>
+        </div>
+
+        <h2 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
+          <Zap className="w-4 h-4 text-navy-600" /> API plans for developers and AI tools
+        </h2>
         <div className="grid sm:grid-cols-2 gap-6">
           {(plans.data?.plans ?? []).map((p) => {
             const current = myPlan.data?.plan === p.id;
@@ -100,11 +121,6 @@ export default function PricingPage() {
                     : "border-slate-200"
                 }`}
               >
-                {isPaid && (
-                  <span className="absolute -top-3 left-6 bg-navy-800 text-brass-300 text-xs font-semibold px-3 py-1 rounded-full">
-                    Most popular
-                  </span>
-                )}
                 <div className="flex items-baseline justify-between">
                   <h2 className="text-lg font-semibold text-slate-900">
                     {p.name}
@@ -193,26 +209,6 @@ export default function PricingPage() {
             </Button>
           </div>
         )}
-
-        {/* One-time report offer */}
-        <div className="mt-10 rounded-2xl border border-brass-400 bg-amber-50 p-6 flex flex-wrap items-center gap-4">
-          <div className="flex-1 min-w-60">
-            <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-              <FileText className="w-4 h-4 text-navy-600" />
-              Naming a business? Name Clearance Report — $
-              {reportInfo.data?.priceUsd ?? 29} one-time
-            </h3>
-            <p className="mt-1.5 text-sm text-slate-600">
-              No subscription. Run the free name check, then unlock the full
-              PDF report: the top live conflicting trademarks with owners and
-              serial numbers, domain status, sound-alike risks, and a
-              checklist to hand to your attorney or partner.
-            </p>
-          </div>
-          <Button asChild className="bg-navy-700 hover:bg-navy-800">
-            <Link to="/namecheck">Check a name free →</Link>
-          </Button>
-        </div>
 
         {isOwner.data && (
           <div className="mt-10 rounded-2xl border border-slate-300 bg-white p-6">

@@ -257,6 +257,17 @@ export default function NameCheckPage() {
           </div>
         )}
 
+        {submitted && !loading && (
+          <div className="mt-6 space-y-4">
+            <ReportCTA
+              name={submitted}
+              classes={classes}
+              verdict={d?.conflicts?.verdict}
+            />
+            <AttorneyLeadForm businessName={submitted} />
+          </div>
+        )}
+
         {submitted && (
           <div className="mt-8 space-y-4">
             {/* 1. USPTO trademark */}
@@ -496,8 +507,6 @@ export default function NameCheckPage() {
               .
             </div>
 
-            <ReportCTA name={submitted} classes={classes} />
-            <AttorneyLeadForm businessName={submitted} />
             <p className="text-xs text-slate-500">
               MarkCitadel is an information tool, not a law firm. Results are a
               preliminary screening and are not legal advice.
